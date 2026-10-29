@@ -753,3 +753,273 @@ dl.kv dd {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
 }
+
+/* ---------- series colours (validated: dataviz palette slots 1–2, light and dark) */
+:root {
+  --s1: #2a78d6;
+  --s2: #eb6834;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --s1: #3987e5;
+    --s2: #d95926;
+  }
+}
+:root[data-theme='dark'] {
+  --s1: #3987e5;
+  --s2: #d95926;
+}
+
+/* ---------- collections */
+.playbook {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px 24px;
+  align-items: center;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.playbook-steps {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.pb-step {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12px;
+  min-width: 92px;
+  position: relative;
+}
+.pb-step b {
+  font-size: 13px;
+}
+.pb-step span {
+  color: var(--ink-3);
+}
+.playbook-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.playbook-counts {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+/* ---------- insights */
+.insights {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.insights-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.mini-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.mini-kpis > div {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.mini-kpis span {
+  font-size: 12px;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 550;
+}
+.mini-kpis b {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.mini-kpis b.bad {
+  color: var(--bad);
+}
+.mini-kpis b.ok {
+  color: var(--ok);
+}
+.mini-kpis small {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.chart-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.legend {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--ink-2);
+  flex-wrap: wrap;
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sw {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.sw.s1 {
+  background: var(--s1);
+}
+.sw.s2 {
+  background: var(--s2);
+}
+.chart-box {
+  position: relative;
+}
+.chart-box svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+.chart-box .s1 {
+  fill: var(--s1);
+}
+.chart-box .s2 {
+  fill: var(--s2);
+}
+.chart-box .grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.chart-box .baseline {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+}
+.chart-box .axis {
+  fill: var(--ink-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-box .value {
+  fill: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+}
+.chart-box rect:focus {
+  outline: none;
+}
+.tip {
+  position: absolute;
+  top: 8px;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+  font-size: 12px;
+  min-width: 190px;
+  pointer-events: none;
+  z-index: 2;
+}
+.tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+.tip-row span {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.tip-row.total {
+  border-top: 1px solid var(--border);
+  padding-top: 3px;
+  font-weight: 650;
+}
+.tip-item {
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+.assumptions {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+table.plain {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+table.plain th,
+table.plain td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+table.plain td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.factor-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.plan-bar {
+  display: flex;
+  gap: 3px;
+  margin-top: 6px;
+}
+.plan-bar i {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+.plan-bar i.paid {
+  background: var(--ok);
+}
+.plan-bar i.late {
+  background: var(--bad);
+}
+
+@media (max-width: 1100px) {
+  .insights-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .playbook {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 720px) {
+  .mini-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

@@ -15,6 +15,11 @@ What to try (about 3 minutes):
 5. On the paid invoice, press **Simulate buyer dispute**. It appears under **Discrepancies**; **Draft response** asks the Support agent for a reply built from the invoice records.
 6. **Ask the agent**: “Send reminders for everything more than 14 days overdue.” It finds the invoices, proposes one reminder each, and they wait in Approvals until you approve.
 7. **Mapping** shows how Claude mapped Fernhill's tables, with its reasons. Change a policy (for example reminders to `auto`) and save.
+8. **Collections** shows the playbook's decision for every overdue invoice. INV-1042 is on **Hold** (its note says the customer promised to pay), INV-1038 gets **Offer plan** (the customer asked to split it), the rest get a friendly first reminder. Press **Run playbook**; the reminders wait in Approvals. If it is evening or the weekend in Pacific time, approved reminders show as **Scheduled** for 08:00 with a **Send now** button.
+9. Approve the INV-1038 payment plan, open INV-1038 → **Pay as customer** → **Pay instalment**. The legacy app shows the running total, the drawer shows "1 of 2 instalments paid", and nothing is flagged as a problem.
+10. **Insights** shows the 9-week cash forecast, late-payment risk with reasons (Tom Whitaker and Daniel Reyes habitually pay late), and how each customer pays. Under **Month-end books**, download the Xero or QuickBooks file: each PayPal fee is its own line.
+
+Shortcut: `node scripts/stage-demo.mjs` puts a fresh demo into this lived-in state in a few seconds.
 
 ## Run it locally (under 10 minutes)
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, DISCREPANCY_LABEL, fmtMoney, type Config, type Discrepancy, type LedgerRow } from '../api';
-import { humanize, Pill } from '../cells';
+import { humanize, Pill, RiskCell } from '../cells';
 
 export function RecordDrawer(props: {
   row: LedgerRow;
@@ -12,6 +12,7 @@ export function RecordDrawer(props: {
 }) {
   const { row, config, onClose, toast, onAsk, onChanged } = props;
   const [discrepancies, setDiscrepancies] = useState<Discrepancy[]>([]);
+  const [installments, setInstallments] = useState(3);
   const cur = config.currency;
   useEffect(() => {
     api
@@ -147,6 +148,42 @@ export function RecordDrawer(props: {
             </section>
           </div>
 
+          {row.riskBand && (
+            <section className="callout info">
+              <b>Late-payment risk:</b> <RiskCell band={row.riskBand} score={row.riskScore} />{' '}
+              {row.expectedPayDate && <span className="muted">expected around {row.expectedPayDate}</span>}
+              <ul className="factor-list">
+                {row.riskFactors.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {row.plan && (
+            <section>
+              <b>
+                Payment plan: {row.plan.covered} of {row.plan.installments} instalments paid
+              </b>
+              {row.plan.nextDue && <span className="muted"> · next due {row.plan.nextDue}</span>}
+              {row.plan.behind > 0 && (
+                <span className="muted"> · behind by {fmtMoney(row.plan.behind, cur)}</span>
+              )}
+              <div className="plan-bar" aria-hidden="true">
+                {Array.from({ length: row.plan.installments }, (_, i) => (
+                  <i
+                    key={i}
+                    className={
+                      i < row.plan!.covered
+                        ? 'paid'
+                        : row.plan!.behind > 0 && i === row.plan!.covered
+                          ? 'late'
+                          : ''
+                    }
+                  />
+                ))}
+              </div>
+            </section>
+          )}
           {discrepancies
             .filter((d) => !d.resolvedAt)
             .map((d) => (
@@ -161,6 +198,34 @@ export function RecordDrawer(props: {
             ))}
 
           <div className="actions-row">
+            {row.entity === 'invoice' && linked && ppOpen && !row.plan && (
+              <span className="plan-offer">
+                <select
+                  className="btn"
+                  value={installments}
+                  onChange={(e) => setInstallments(Number(e.target.value))}
+                  aria-label="Number of instalments"
+                >
+                  {[2, 3, 4, 6].map((n) => (
+                    <option key={n} value={n}>
+                      {n} instalments
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="btn"
+                  onClick={() =>
+                    propose(
+                      'offer_payment_plan',
+                      { installments, intervalDays: 14 },
+                      `Offer ${row.customer} ${installments} instalments for ${row.number}`,
+                    )
+                  }
+                >
+                  Offer payment plan
+                </button>
+              </span>
+            )}
             {row.entity === 'invoice' && linked && ppOpen && (
               <button
                 className="btn"

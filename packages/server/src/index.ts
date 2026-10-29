@@ -2,12 +2,23 @@ import {
   AgentUnavailableError,
   claudeConfigured,
   draftDisputeResponse,
+  draftReminders,
   OpsAgent,
   type OpsEvent,
 } from '@paypal-retrofit/agents';
 import {
   ACTION_KINDS,
+  cashForecast,
+  customerProfiles,
   handleWebhook,
+  invoiceRisks,
+  isQuiet,
+  journal,
+  journalCsv,
+  monthRange,
+  monthSummary,
+  planCollections,
+  runCollections,
   hasErrors,
   ledger,
   reconcile,
@@ -101,6 +112,13 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
       source: { kind: rf.source.kind },
       demo: opts.demo ? { legacyAppPath: opts.demo.legacyAppPath, mockPath: opts.demo.mockPath } : null,
       webhookConfigured: Boolean(rf.config.env.paypalWebhookId ?? rf.state.getMeta('paypal.webhookId')),
+      controls: {
+        rules: rf.mapping.rules,
+        limits: rf.mapping.limits,
+        quietHours: rf.mapping.quietHours ?? null,
+        quietNow: rf.mapping.quietHours ? isQuiet(rf.mapping.quietHours, new Date()) : false,
+        collections: rf.mapping.collections,
+      },
     }),
   );
   api.get(
@@ -247,6 +265,65 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
     );
   }
 
+  // ---- advanced: collections, insights, plans, books
+  api.get(
+    '/collections',
+    wrap(async (_req, res) => res.json(await planCollections(rf))),
+  );
+  api.post(
+    '/collections/run',
+    wrap(async (req, res) => {
+      const useAi = req.body?.ai !== false && claudeConfigured();
+      const run = await runCollections(rf, {
+        origin: 'dashboard',
+        only: Array.isArray(req.body?.only) ? req.body.only.map(String) : undefined,
+        writer: useAi ? (items) => draftReminders(rf, items) : undefined,
+      });
+      res.json(run);
+    }),
+  );
+  api.get(
+    '/insights',
+    wrap(async (_req, res) =>
+      res.json({
+        forecast: await cashForecast(rf),
+        risks: await invoiceRisks(rf),
+        customers: [...(await customerProfiles(rf)).values()],
+        plans: rf.state.listPlans(),
+      }),
+    ),
+  );
+  api.get('/plans', (_req, res) => res.json(rf.state.listPlans()));
+  api.post(
+    '/actions/:id/run-now',
+    wrap(async (req, res) => res.json(await rf.approve(Number(req.params.id), { force: true }))),
+  );
+  api.get(
+    '/month-summary',
+    wrap(async (req, res) =>
+      res.json(await monthSummary(rf, String(req.query.month ?? new Date().toISOString().slice(0, 7)))),
+    ),
+  );
+  api.get(
+    '/export/journal.csv',
+    wrap(async (req, res) => {
+      const month = req.query.month ? String(req.query.month) : undefined;
+      const range = month
+        ? monthRange(month)
+        : { from: req.query.from as string | undefined, to: req.query.to as string | undefined };
+      const format = (
+        ['generic', 'xero', 'quickbooks'].includes(String(req.query.format)) ? req.query.format : 'generic'
+      ) as 'generic' | 'xero' | 'quickbooks';
+      const csv = journalCsv(await journal(rf, range.from, range.to), format);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="paypal-journal-${month ?? 'all'}-${format}.csv"`,
+      );
+      res.send(csv);
+    }),
+  );
+
   app.use('/api', api);
 
   const dist = opts.dashboardDir ?? DEFAULT_DASHBOARD_DIR;
@@ -262,6 +339,14 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
         .send('paypal-retrofit API is running. Build the dashboard with "pnpm build" to get the UI.'),
     );
   }
+
+  // Scheduled actions (held for quiet hours) run when their time comes.
+  timers.push(
+    setInterval(
+      () => void rf.runDue().catch((e) => rf.log.warn(`scheduled actions failed: ${(e as Error).message}`)),
+      60000,
+    ),
+  );
 
   if (opts.watch) {
     const every = Math.max(10, rf.config.sync.intervalSeconds) * 1000;

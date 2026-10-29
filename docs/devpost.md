@@ -12,6 +12,15 @@ Most small businesses already run on something: an old invoicing app, a booking 
 
 paypal-retrofit is an SDK, CLI and web console. Point it at a SQLite or Postgres database, or a folder of CSV exports. Claude maps the schema to PayPal objects (customers, catalog products, invoices with line items, recurring agreements) and explains every choice. One sync sends open invoices through PayPal Invoicing with the business's own invoice numbers and writes the pay links back. Verified webhooks write payments back into the legacy system; a reconciler repairs anything a lost webhook missed and flags mismatches such as invoices marked paid by hand but still open in PayPal. An Ops agent answers receivables questions and proposes reminders, recorded payments, refunds and subscriptions, and a Support agent drafts dispute responses from the invoice records. Every side effect passes through a policy the owner sets: auto, confirm or never.
 
+### Built for how small businesses actually get paid
+
+- **Collections playbook.** Every morning each overdue invoice gets one decision with a reason: remind (friendly, firm, final), wait, hold (open dispute or a promise to pay), offer a payment plan, or call. Claude writes each reminder from the customer's history.
+- **Payment plans on PayPal partial payments.** "Can I pay in two parts?" becomes instalments on the same PayPal invoice; retrofit tracks the schedule, reminds per instalment and writes the running total back.
+- **Approval rules that think in money.** Small refunds run on their own, larger ones wait, daily caps stop runaway automation, and every action says which rule applied.
+- **Quiet hours.** Reminders approved at night or at the weekend are scheduled for business hours in the business's time zone, daylight saving included.
+- **Risk and cash forecast.** Late-payment risk per invoice and a 9-week forecast, learned from the business's own payment history and explained factor by factor.
+- **Month-end close.** A payments ledger with gross, PayPal fee and net, exported for Xero or QuickBooks so the books match the payout.
+
 ## How we built it
 
 - TypeScript monorepo: engine (`core`), agents, Express server, React console, CLI, and a local PayPal mock for offline tests.
@@ -28,6 +37,10 @@ Making an agent useful with money without letting it move money. The answer was 
 Retrofitting is mostly about state: what the old system believes, what PayPal believes, and what to do when they disagree. Reconciliation turned out to be the feature small businesses need most.
 
 ## What's next
+
+Late fees and early-payment discounts as policy, customer statements, multi-currency, and learning the best reminder timing per customer from what actually gets paid.
+
+## Earlier ideas still on the list
 
 More sources (MySQL, Google Sheets, QuickBooks exports), Orders-based checkout links for one-off sales, an MCP server so buyer agents can discover a retrofitted catalogue, and a hosted multi-tenant version.
 

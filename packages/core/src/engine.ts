@@ -8,7 +8,8 @@ import {
   type LegacyInvoice,
   type LegacySubscription,
 } from './entities.ts';
-import { DEFAULT_POLICIES, type RetrofitMapping } from './mapping/schema.ts';
+import { type RetrofitMapping } from './mapping/schema.ts';
+import { decidePolicy, describeLocal, type PolicyDecision } from './policy.ts';
 import {
   CANCELLED_STATUSES,
   OPEN_STATUSES,
@@ -25,9 +26,9 @@ import {
   subscriptionBody,
   type PayloadContext,
 } from './paypal/payloads.ts';
-import { StateStore, type LinkRecord } from './state/store.ts';
+import { StateStore, type LinkRecord, type PlanRecord } from './state/store.ts';
 import type { ActionKind, ActionOrigin, ActionRecord, ActionTarget, PolicyMode, Row } from './types.ts';
-import { cents, Logger, toMoney, todayIso } from './util.ts';
+import { addDaysIso, cents, Logger, round2, toMoney, todayIso } from './util.ts';
 
 export interface PlanItem {
   kind: ActionKind;
@@ -111,10 +112,37 @@ export class Retrofit {
     };
   }
 
+  /** The mode an action of this kind gets without knowing its amount (used for plans and display). */
   policyFor(kind: ActionKind): PolicyMode {
-    const p = this.mapping.policies[kind] ?? DEFAULT_POLICIES[kind];
-    if (p === 'confirm' && this.config.env.autoApprove) return 'auto';
-    return p;
+    return this.decide(kind, null).mode;
+  }
+
+  decide(kind: ActionKind, amount: number | null, now = new Date()): PolicyDecision {
+    return decidePolicy(this.mapping, this.state, kind, {
+      amount,
+      now,
+      autoApprove: this.config.env.autoApprove,
+      currency: this.mapping.currency,
+    });
+  }
+
+  /** The money an action moves or concerns, for amount-based rules and daily limits. */
+  async actionAmount(
+    kind: ActionKind,
+    target: ActionTarget,
+    payload: Record<string, unknown>,
+  ): Promise<number | null> {
+    if (payload.amount !== undefined && payload.amount !== null && Number.isFinite(Number(payload.amount)))
+      return Number(payload.amount);
+    if (target.entity === 'subscription') {
+      const sub = await this.subscription(target.legacyPk).catch(() => null);
+      return sub?.amount ?? null;
+    }
+    const link = this.state.getLink('invoice', target.legacyPk);
+    if (kind === 'create_refund') return link?.paypalPaid ?? null;
+    const inv = await this.invoice(target.legacyPk).catch(() => null);
+    if (!inv) return null;
+    return round2(inv.total - (link?.paypalPaid ?? 0));
   }
 
   // ------------------------------------------------------------------ planning
@@ -244,34 +272,73 @@ export class Retrofit {
 
   /** The only way anything (sync, agents, dashboard) causes a PayPal side effect. */
   async propose(input: ProposeInput): Promise<ActionRecord> {
-    const policy = this.policyFor(input.kind);
-    if (policy === 'never') {
+    const payload = input.payload ?? {};
+    const amount = await this.actionAmount(input.kind, input.target, payload);
+    const d = this.decide(input.kind, amount);
+    if (d.mode === 'never') {
       const a = this.state.createAction({
         ...input,
-        payload: input.payload ?? {},
-        policy,
+        payload,
+        policy: 'never',
         status: 'rejected',
+        policyReason: d.reason,
+        amount,
       });
-      this.state.finishAction(a.id, 'rejected', { reason: `Policy for ${input.kind} is "never"` });
+      this.state.finishAction(a.id, 'rejected', { reason: d.reason });
       return this.state.getAction(a.id)!;
     }
-    const a = this.state.createAction({ ...input, payload: input.payload ?? {}, policy, status: 'pending' });
+    const a = this.state.createAction({
+      ...input,
+      payload,
+      policy: d.mode,
+      status: 'pending',
+      policyReason: d.reason,
+      amount,
+    });
+    if (a.status !== 'pending') return a; // an identical action is already scheduled
     this.emit('action', a);
-    if (policy === 'auto') return this.execute(a.id);
+    if (d.mode === 'auto') return this.executeOrHold(a.id, d);
     return a;
   }
 
-  async approve(id: number): Promise<ActionRecord> {
+  /** Runs now, or schedules for the end of quiet hours. */
+  private async executeOrHold(id: number, d: PolicyDecision, force = false): Promise<ActionRecord> {
+    if (d.holdUntil && !force) {
+      const tz = this.mapping.quietHours?.timezone ?? 'UTC';
+      this.state.scheduleAction(
+        id,
+        d.holdUntil,
+        `${d.reason}. Held for quiet hours until ${describeLocal(d.holdUntil, tz)}`,
+      );
+      const out = this.state.getAction(id)!;
+      this.emit('action', out);
+      return out;
+    }
+    return this.execute(id);
+  }
+
+  /** Approves a pending action. Customer-facing actions approved during quiet hours are scheduled unless forced. */
+  async approve(id: number, opts: { force?: boolean } = {}): Promise<ActionRecord> {
     const a = this.state.getAction(id);
     if (!a) throw new Error(`Action ${id} not found`);
+    if (a.status === 'scheduled' && opts.force) return this.execute(id);
     if (a.status !== 'pending') throw new Error(`Action ${id} is ${a.status}, not pending`);
-    return this.execute(id);
+    const d = this.decide(a.kind, a.amount);
+    return this.executeOrHold(id, { ...d, reason: `Approved by a person (${d.reason})` }, opts.force);
+  }
+
+  /** Executes scheduled actions whose time has come. Called by serve every minute. */
+  async runDue(now = new Date()): Promise<ActionRecord[]> {
+    const out: ActionRecord[] = [];
+    for (const a of this.state.listDue(now.toISOString())) out.push(await this.execute(a.id));
+    return out;
   }
 
   reject(id: number, reason = 'Rejected by a person'): ActionRecord {
     const a = this.state.getAction(id);
     if (!a) throw new Error(`Action ${id} not found`);
-    if (a.status !== 'pending') throw new Error(`Action ${id} is ${a.status}, not pending`);
+    if (a.status !== 'pending' && a.status !== 'scheduled')
+      throw new Error(`Action ${id} is ${a.status}, not pending`);
     this.state.finishAction(id, 'rejected', { reason });
     const out = this.state.getAction(id)!;
     this.emit('action', out);
@@ -385,6 +452,8 @@ export class Retrofit {
         await this.applySubscriptionStatus(link, s.status);
         return { cancelled: link.paypalId, status: s.status };
       }
+      case 'offer_payment_plan':
+        return this.offerPaymentPlan(pk, a.payload);
       case 'accept_dispute': {
         const disputeId = String(a.payload.disputeId ?? '');
         if (!disputeId) throw new Error('disputeId is required');
@@ -394,6 +463,78 @@ export class Retrofit {
         );
       }
     }
+  }
+
+  /**
+   * Turns one invoice into instalments using PayPal's native partial payments: the invoice stays a single
+   * PayPal invoice, the customer may pay any amount from the instalment minimum, and retrofit tracks the
+   * schedule, reminds per instalment and writes the running total back.
+   */
+  private async offerPaymentPlan(pk: string, payload: Record<string, unknown>) {
+    const link = this.requireLink('invoice', pk);
+    const legacy = await this.invoice(pk);
+    const inv = await this.paypal.getInvoice(link.paypalId);
+    if (!OPEN_STATUSES.includes(inv.status) || inv.status === 'DRAFT')
+      throw new Error(`PayPal invoice is ${inv.status}; a plan needs a sent, unpaid invoice`);
+    const n = Math.min(12, Math.max(2, Math.round(Number(payload.installments ?? 3))));
+    const interval = Math.min(92, Math.max(7, Math.round(Number(payload.intervalDays ?? 14))));
+    const paid = Number(inv.payments?.paid_amount?.value ?? 0);
+    const total = Number(inv.amount?.value ?? legacy.total);
+    const remaining = round2(total - paid);
+    if (remaining <= 0) throw new Error('Nothing left to pay');
+    const each = Math.floor((remaining * 100) / n) / 100;
+    const first = String(payload.firstDue ?? addDaysIso(todayIso(), 7));
+    const schedule = Array.from({ length: n }, (_, i) => ({
+      n: i + 1,
+      due: addDaysIso(first, i * interval),
+      amount: i === n - 1 ? round2(remaining - each * (n - 1)) : each,
+    }));
+    const cur = this.mapping.currency;
+    const note = `Payment plan agreed: ${n} payments of ${toMoney(each)} ${cur} (${schedule.map((x) => x.due).join(', ')}). Pay each instalment from this invoice; any amount from ${toMoney(each)} ${cur} is accepted.`;
+    const { links: _links, ...body } = inv as any;
+    await this.paypal.updateInvoice(
+      link.paypalId,
+      {
+        ...body,
+        detail: { ...inv.detail, note: [inv.detail.note, note].filter(Boolean).join('\n\n').slice(0, 4000) },
+        configuration: {
+          ...(body.configuration ?? {}),
+          partial_payment: {
+            allow_partial_payment: true,
+            minimum_amount_due: { currency_code: cur, value: toMoney(each) },
+          },
+        },
+      },
+      true,
+    );
+    const plan = this.state.upsertPlan({
+      legacyPk: pk,
+      paypalId: link.paypalId,
+      installments: n,
+      installmentAmount: each,
+      total: remaining,
+      schedule,
+      status: 'active',
+    });
+    this.state.resolveDiscrepanciesFor('invoice', pk, ['partial_payment'], 'Payment plan agreed');
+    await this.refreshInvoice(link.paypalId);
+    return { plan: plan.schedule, installments: n, each, note };
+  }
+
+  planProgress(plan: PlanRecord, paid: number, today = todayIso()) {
+    let cumulative = 0;
+    let covered = 0;
+    let nextDue: { n: number; due: string; amount: number } | null = null;
+    let behind = 0;
+    for (const s of plan.schedule) {
+      cumulative = round2(cumulative + s.amount);
+      if (paid + 0.005 >= cumulative) covered = s.n;
+      else {
+        nextDue ??= s;
+        if (s.due < today) behind = round2(cumulative - paid);
+      }
+    }
+    return { covered, nextDue, behind, paid, remaining: round2(plan.total - paid) };
   }
 
   private requireLink(entity: string, pk: string): LinkRecord {
@@ -571,7 +712,9 @@ export class Retrofit {
   async applyInvoiceState(link: LinkRecord, inv: PayPalInvoice): Promise<{ summary: string }> {
     const cache = invoiceCache(inv);
     this.state.upsertLink({ ...link, ...cache, payLink: payerViewUrl(inv) ?? link.payLink });
+    this.recordInvoicePayments(link, inv);
     const legacy = await this.invoice(link.legacyPk);
+    const plan = this.state.getPlan(legacy.pk);
     const sm = this.mapping.entities.invoice.statusMap;
     let summary = `${legacy.number}: PayPal ${inv.status}`;
     if (PAID_STATUSES.includes(inv.status) && legacy.state !== 'paid') {
@@ -587,6 +730,14 @@ export class Retrofit {
         'Payment written back',
       );
       summary = `${legacy.number} paid in PayPal (${toMoney(cache.paypalPaid ?? legacy.total)} ${this.mapping.currency}); legacy status set to "${sm.paid[0]}"`;
+      if (plan?.status === 'active') {
+        this.state.setPlanStatus(legacy.pk, 'completed');
+        summary += '; payment plan completed';
+      }
+    } else if (inv.status === 'PARTIALLY_PAID' && plan?.status === 'active') {
+      await this.writeBack('invoice', legacy.pk, { paidAmount: cache.paypalPaid ?? undefined });
+      const p = this.planProgress(plan, Number(cache.paypalPaid ?? 0) - (legacy.total - plan.total));
+      summary = `${legacy.number}: instalment ${p.covered} of ${plan.installments} received (${toMoney(cache.paypalPaid ?? 0)} of ${toMoney(legacy.total)} ${this.mapping.currency} paid)`;
     } else if (inv.status === 'PARTIALLY_PAID') {
       await this.writeBack('invoice', legacy.pk, { paidAmount: cache.paypalPaid ?? undefined });
       this.state.openDiscrepancy({
@@ -614,6 +765,41 @@ export class Retrofit {
     }
     this.emit('invoice', { pk: legacy.pk, status: inv.status });
     return { summary };
+  }
+
+  /** Mirrors the invoice's payments and refunds into retrofit's payments ledger (fees are added from captures). */
+  private recordInvoicePayments(link: LinkRecord, inv: PayPalInvoice) {
+    const cur = inv.detail?.currency_code ?? this.mapping.currency;
+    (inv.payments?.transactions ?? []).forEach((t, i) => {
+      const external = t.type === 'EXTERNAL';
+      this.state.recordPayment({
+        id: String(t.payment_id ?? t.transaction_id ?? `${inv.id}-p${i}`),
+        entity: 'invoice',
+        legacyPk: link.legacyPk,
+        paypalId: inv.id,
+        kind: external ? 'external_payment' : 'payment',
+        gross: Number(t.amount?.value ?? 0),
+        fee: external ? 0 : null,
+        currency: cur,
+        method: external ? (t.method ?? 'OTHER') : 'PAYPAL',
+        occurredAt: t.payment_date ?? todayIso(),
+      });
+    });
+    ((inv.refunds as any)?.transactions ?? []).forEach((t: any, i: number) => {
+      const external = t.type === 'EXTERNAL';
+      this.state.recordPayment({
+        id: String(t.refund_id ?? `${inv.id}-r${i}`),
+        entity: 'invoice',
+        legacyPk: link.legacyPk,
+        paypalId: inv.id,
+        kind: external ? 'external_refund' : 'refund',
+        gross: -Number(t.amount?.value ?? 0),
+        fee: 0,
+        currency: cur,
+        method: external ? (t.method ?? 'OTHER') : 'PAYPAL',
+        occurredAt: t.refund_date ?? todayIso(),
+      });
+    });
   }
 
   async applySubscriptionStatus(link: LinkRecord, status: string) {

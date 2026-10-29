@@ -166,9 +166,9 @@ export class PayPalClient {
   getInvoice(id: string) {
     return this.request<PayPalInvoice>('GET', `/v2/invoicing/invoices/${encodeURIComponent(id)}`);
   }
-  updateInvoice(id: string, invoice: unknown) {
+  updateInvoice(id: string, invoice: unknown, notifyRecipient = false) {
     return this.request<PayPalInvoice>('PUT', `/v2/invoicing/invoices/${encodeURIComponent(id)}`, invoice, {
-      query: { send_to_recipient: 'false' },
+      query: { send_to_recipient: notifyRecipient ? 'true' : 'false' },
       representation: true,
     });
   }

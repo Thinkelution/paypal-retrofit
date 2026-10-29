@@ -111,6 +111,12 @@ async function applyEvent(rf: Retrofit, event: any): Promise<string | null> {
     const link = number ? await findInvoiceLinkByNumber(rf, number) : undefined;
     if (!link) return null;
     const res = await rf.refreshInvoice(link.paypalId);
+    // Captures carry PayPal's fee; keep it so the books can show gross, fee and net.
+    const fee = r.seller_receivable_breakdown?.paypal_fee?.value;
+    if (type === 'PAYMENT.CAPTURE.COMPLETED' && r.id && fee !== undefined) {
+      rf.state.setPaymentFee(String(r.id), Number(fee));
+      return `${res?.summary ?? 'Payment captured'}; PayPal fee ${fee} recorded`;
+    }
     return res?.summary ?? null;
   }
 

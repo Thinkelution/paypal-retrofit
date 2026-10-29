@@ -24,7 +24,7 @@ export async function listen(app: express.Express) {
 }
 
 /** Fernhill DB + mock PayPal + a webhook receiver wired to a Retrofit engine. */
-export async function harness(opts: { autoApprove?: boolean } = {}) {
+export async function harness(opts: { autoApprove?: boolean; quietHours?: boolean } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'retrofit-test-'));
   const dbFile = seed({ file: path.join(dir, 'fernhill.db'), today: new Date('2026-10-29T12:00:00Z') });
 
@@ -46,6 +46,8 @@ export async function harness(opts: { autoApprove?: boolean } = {}) {
   const schema = await source.introspect();
   const proposal = heuristicMapping(schema)!;
   const { mapping, issues } = validateMapping(proposal, schema);
+  // Quiet hours depend on the wall clock; tests that need them set them explicitly.
+  if (!opts.quietHours) mapping.quietHours = undefined;
 
   const config: ResolvedConfig = {
     source: `sqlite:${dbFile}`,

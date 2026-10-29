@@ -1,6 +1,7 @@
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import {
   hasErrors,
+  recommendedControls,
   heuristicMapping,
   validateMapping,
   type MappingIssue,
@@ -109,9 +110,9 @@ export interface MapperResult {
 
 export async function proposeMapping(
   schema: SchemaDescription,
-  opts: { useClaude?: boolean; currencyHint?: string } = {},
+  opts: { useClaude?: boolean; currencyHint?: string; timezone?: string } = {},
 ): Promise<MapperResult> {
-  const hint = heuristicMapping(schema, opts.currencyHint);
+  const hint = heuristicMapping(schema, opts.currencyHint, opts.timezone);
   const fallback = (error?: string): MapperResult => {
     if (!hint)
       return {
@@ -166,7 +167,7 @@ export async function proposeMapping(
     if (response.stop_reason === 'max_tokens') return fallback('the response was cut off');
     const out = response.parsed_output;
     if (!out) return fallback('the response could not be parsed');
-    const candidate = toMapping(out);
+    const candidate = toMapping(out, opts.timezone);
     const { mapping, issues } = validateMapping(candidate, schema);
     if (hasErrors(issues)) {
       const h = fallback();
@@ -195,7 +196,7 @@ export async function proposeMapping(
 
 const nn = <T>(v: T | null | undefined): T | undefined => (v === null ? undefined : v);
 
-function toMapping(o: MapperOutput): RetrofitMapping {
+function toMapping(o: MapperOutput, timezone = 'UTC'): RetrofitMapping {
   const i = o.invoice;
   const s = o.subscription;
   return JSON.parse(
@@ -281,6 +282,7 @@ function toMapping(o: MapperOutput): RetrofitMapping {
           : undefined,
       },
       policies: {},
+      ...recommendedControls(timezone),
       rationale: Object.fromEntries(o.rationale.map((r) => [r.path, r.reason])),
       confidence: Object.fromEntries(
         Object.entries(o.confidence)

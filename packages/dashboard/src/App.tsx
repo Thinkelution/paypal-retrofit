@@ -9,9 +9,19 @@ import { Approvals } from './pages/Approvals';
 import { Discrepancies } from './pages/Discrepancies';
 import { Ledger } from './pages/Ledger';
 import { Mapping } from './pages/Mapping';
+import { Collections } from './pages/Collections';
+import { Insights } from './pages/Insights';
 
-type Tab = 'ledger' | 'approvals' | 'discrepancies' | 'mapping' | 'activity';
-const TABS: Tab[] = ['ledger', 'approvals', 'discrepancies', 'mapping', 'activity'];
+type Tab = 'ledger' | 'collections' | 'insights' | 'approvals' | 'discrepancies' | 'mapping' | 'activity';
+const TABS: Tab[] = [
+  'ledger',
+  'collections',
+  'insights',
+  'approvals',
+  'discrepancies',
+  'mapping',
+  'activity',
+];
 const tabFromHash = (): Tab => {
   const h = window.location.hash.slice(1) as Tab;
   return TABS.includes(h) ? h : 'ledger';
@@ -182,10 +192,12 @@ export function App() {
             <div className="value">{fmtMoney(s?.paidViaPayPalAmount, cur)}</div>
             <div className="sub">{s?.paidViaPayPal ?? 0} payments, written back automatically</div>
           </div>
-          <div className="kpi">
-            <div className="label">In PayPal</div>
-            <div className="value">{s ? `${s.linked}/${s.invoices}` : '—'}</div>
-            <div className="sub">invoices linked</div>
+          <div className="kpi clickable" onClick={() => setTab('insights')}>
+            <div className="label">Expected in 30 days</div>
+            <div className="value">{fmtMoney(s?.expectedNext30, cur)}</div>
+            <div className="sub">
+              {fmtMoney(s?.atRisk, cur)} at high risk · {s ? `${s.linked}/${s.invoices}` : '—'} in PayPal
+            </div>
           </div>
           <div
             className={`kpi clickable ${s && s.discrepancies + s.pendingActions > 0 ? 'warn' : ''}`}
@@ -204,7 +216,9 @@ export function App() {
           {(
             [
               ['ledger', 'Ledger', null],
-              ['approvals', 'Approvals', s?.pendingActions],
+              ['collections', 'Collections', null],
+              ['insights', 'Insights', null],
+              ['approvals', 'Approvals', (s?.pendingActions ?? 0) + (s?.scheduledActions ?? 0)],
               ['discrepancies', 'Discrepancies', s?.discrepancies],
               ['mapping', 'Mapping', null],
               ['activity', 'Webhooks', null],
@@ -246,6 +260,19 @@ export function App() {
             onDraft={setDispute}
           />
         )}
+        {tab === 'collections' && (
+          <Collections
+            dark={dark}
+            config={config}
+            lastRun={s?.lastCollectionsAt ?? null}
+            toast={(m) => {
+              toast(m);
+              refresh();
+            }}
+            onAsk={ask}
+          />
+        )}
+        {tab === 'insights' && <Insights dark={dark} config={config} />}
         {tab === 'mapping' && <Mapping dark={dark} toast={toast} />}
         {tab === 'activity' && <Activity dark={dark} />}
 

@@ -1,5 +1,19 @@
 import { betaZodTool } from '@anthropic-ai/sdk/helpers/beta/zod';
-import { ACTION_KINDS, ledger, redact, summary, type Retrofit } from '@paypal-retrofit/core';
+import {
+  ACTION_KINDS,
+  cashForecast,
+  customerProfiles,
+  invoiceRisks,
+  ledger,
+  monthSummary,
+  planCollections,
+  redact,
+  runCollections,
+  summary,
+  type CollectionItem,
+  type ReminderText,
+  type Retrofit,
+} from '@paypal-retrofit/core';
 import * as z from 'zod/v4';
 
 export interface ToolEvent {
@@ -17,7 +31,14 @@ export const json = (v: unknown, revealPii = false) =>
   clip(JSON.stringify(redact(v, { emails: !revealPii }), null, 1));
 
 /** Tools backed by retrofit's own engine. Reads are free; the only write is propose_action, which goes through the policy gate. */
-export function engineTools(rf: Retrofit, emit: (e: ToolEvent) => void, opts: { revealPii?: boolean } = {}) {
+export function engineTools(
+  rf: Retrofit,
+  emit: (e: ToolEvent) => void,
+  opts: {
+    revealPii?: boolean;
+    reminderWriter?: (items: CollectionItem[]) => Promise<Map<string, ReminderText>>;
+  } = {},
+) {
   const wrap =
     <T>(name: string, fn: (input: T) => Promise<unknown>) =>
     async (input: T) => {
@@ -155,6 +176,8 @@ export function engineTools(rf: Retrofit, emit: (e: ToolEvent) => void, opts: { 
 - create_invoice / send_invoice / update_invoice: no payload; usually done by sync.
 - create_subscription / cancel_subscription: target entity "subscription"; cancel takes {reason}.
 - accept_dispute: payload {disputeId, note}.
+- offer_payment_plan: payload {installments: 2-12, intervalDays?: 7-92, firstDue?: YYYY-MM-DD}. Uses PayPal partial payments on the same invoice; use it when a customer asked to pay in parts.
+Results include "status": "executed", "pending" (needs approval), "scheduled" (held for quiet hours; see runAfter) or "rejected", plus "policyReason" explaining which rule applied.
 Call it once per target. Always tell the user what you proposed and whether it ran or is waiting for approval.`,
     inputSchema: z.object({
       kind: z.enum(ACTION_KINDS),
@@ -184,13 +207,113 @@ Call it once per target. Always tell the user what you proposed and whether it r
         kind: action.kind,
         status: action.status,
         policy: action.policy,
+        policyReason: action.policyReason,
+        runAfter: action.runAfter,
         result: action.result,
       };
     }),
   });
 
+  const collectionsPlan = betaZodTool({
+    name: 'collections_plan',
+    description:
+      "The collections playbook's decision for every open PayPal invoice: remind (next reminder in the friendly/firm/final sequence or a missed instalment), wait (too early or too soon), hold (dispute, or a promise to pay), plan (the customer asked to pay in parts), or escalate (all reminders sent; call them). Each has a one-sentence reason. Read-only.",
+    inputSchema: z.object({ decision: z.enum(['remind', 'wait', 'hold', 'plan', 'escalate']).optional() }),
+    run: wrap('collections_plan', async ({ decision }) => {
+      const items = await planCollections(rf);
+      const rows = decision ? items.filter((i) => i.decision === decision) : items;
+      return { count: rows.length, items: rows.map(({ notes: _n, ...i }) => i) };
+    }),
+  });
+
+  const collectionsRun = betaZodTool({
+    name: 'run_collections',
+    description:
+      'Runs the collections playbook: proposes every reminder and payment-plan offer the plan calls for (optionally only for some invoice numbers), with reminder text written for the tone. Everything goes through the policy engine, so most will wait for approval or be held for quiet hours. Use when the owner asks to chase overdue invoices.',
+    inputSchema: z.object({
+      numbers: z.array(z.string()).optional().describe('Limit to these invoice numbers'),
+    }),
+    run: wrap('run_collections', async ({ numbers }) => {
+      let only: string[] | undefined;
+      if (numbers?.length) {
+        const rows = await ledger(rf);
+        only = rows
+          .filter((r) => numbers.some((n) => n.toLowerCase() === r.number.toLowerCase()))
+          .map((r) => r.legacyPk);
+      }
+      const run = await runCollections(rf, { origin: 'agent', only, writer: opts.reminderWriter });
+      for (const p of run.proposed)
+        emit({ type: 'action_proposed', name: 'run_collections', action: p.action });
+      return {
+        writer: run.writer,
+        proposed: run.proposed.map((p) => ({
+          invoice: p.item.number,
+          kind: p.action.kind,
+          tone: p.item.tone,
+          status: p.action.status,
+          policyReason: p.action.policyReason,
+          runAfter: p.action.runAfter,
+        })),
+      };
+    }),
+  });
+
+  const forecast = betaZodTool({
+    name: 'cash_forecast',
+    description:
+      "Expected cash over the next 9 weeks from open invoices (weighted by late-payment risk and each customer's history), payment-plan instalments and active retainers, with the amount at high risk and the assumptions used.",
+    inputSchema: z.object({}),
+    run: wrap('cash_forecast', async () => cashForecast(rf)),
+  });
+
+  const risk = betaZodTool({
+    name: 'payment_risk',
+    description:
+      'Late-payment risk for open invoices: score 1-99, band (low/medium/high), expected pay date, and the factors behind it (days overdue, customer history, disputes, promises, payment plans).',
+    inputSchema: z.object({
+      band: z.enum(['low', 'medium', 'high']).optional(),
+      limit: z.number().int().optional(),
+    }),
+    run: wrap('payment_risk', async ({ band, limit }) => {
+      const rows = (await invoiceRisks(rf)).filter((r) => !band || r.band === band);
+      return { count: rows.length, invoices: rows.slice(0, limit ?? 40) };
+    }),
+  });
+
+  const customerHistory = betaZodTool({
+    name: 'customer_history',
+    description:
+      'How customers pay: invoices, average invoice, on-time rate, usual days late, open and overdue amounts, disputes and a behaviour label. Optionally filter by part of a name.',
+    inputSchema: z.object({ customer: z.string().optional() }),
+    run: wrap('customer_history', async ({ customer }) => {
+      const all = [...(await customerProfiles(rf)).values()];
+      return all.filter((p) => !customer || p.name.toLowerCase().includes(customer.toLowerCase()));
+    }),
+  });
+
+  const monthEnd = betaZodTool({
+    name: 'month_end_summary',
+    description:
+      'Month-end figures from the payments ledger: PayPal gross collected, PayPal fees, net, refunds, payments recorded outside PayPal and the effective fee rate. Month as YYYY-MM (defaults to this month).',
+    inputSchema: z.object({
+      month: z
+        .string()
+        .regex(/^\d{4}-\d{2}$/)
+        .optional(),
+    }),
+    run: wrap('month_end_summary', async ({ month }) =>
+      monthSummary(rf, month ?? new Date().toISOString().slice(0, 7)),
+    ),
+  });
+
   return [
     businessSummary,
+    collectionsPlan,
+    collectionsRun,
+    forecast,
+    risk,
+    customerHistory,
+    monthEnd,
     findInvoices,
     invoiceDetail,
     legacySql,

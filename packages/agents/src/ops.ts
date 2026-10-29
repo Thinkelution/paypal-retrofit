@@ -8,6 +8,7 @@ import {
   FALLBACK_BETA,
   model,
 } from './client.ts';
+import { draftReminders } from './reminders.ts';
 import { engineTools, type ToolEvent } from './tools/engine-tools.ts';
 import { paypalTools } from './tools/paypal-tools.ts';
 
@@ -52,8 +53,11 @@ What you can see:
 - The legacy database itself, read-only (legacy_sql). Tables: ${m.entities.customer.table} (customers), ${m.entities.invoice.table} (invoices)${m.entities.invoice.lines ? `, ${m.entities.invoice.lines.table} (line items)` : ''}${m.entities.subscription ? `, ${m.entities.subscription.table} (recurring agreements)` : ''}.
 - PayPal, read-only (tools prefixed paypal_, from ${toolSource === 'paypal-agent-toolkit' ? "PayPal's Agent Toolkit" : 'the PayPal API'}).
 - Discrepancies found by reconciliation, and actions taken or waiting for approval.
+- The collections playbook (collections_plan, run_collections), late-payment risk (payment_risk), how each customer pays (customer_history), the cash forecast (cash_forecast) and month-end figures with PayPal fees (month_end_summary).
 
-What you can do: only propose_action. The owner's policies decide what runs: ${JSON.stringify(policies)}. "confirm" means it waits for the owner to approve in the dashboard; say so plainly. Never claim something happened unless the tool result says status "executed".
+What you can do: propose_action, or run_collections to queue the playbook's reminders and payment-plan offers. The owner's policies decide what runs: ${JSON.stringify(policies)}. "confirm" means it waits for the owner to approve in the dashboard; say so plainly. Never claim something happened unless the tool result says status "executed". "scheduled" means it is held for quiet hours and will go out at runAfter. When a result has a policyReason, explain it in a few words.
+
+Use judgement like a good bookkeeper: when a customer asked to split a payment, suggest a payment plan (offer_payment_plan) rather than another reminder; do not chase invoices with an open dispute; for "what money is coming in" questions use cash_forecast and say what it assumes.
 
 Rules:
 - Look things up before answering; never guess invoice numbers, amounts, dates or ids.
@@ -67,7 +71,10 @@ Rules:
     if (!this.available) throw new AgentUnavailableError();
     const emit = (e: OpsEvent) => onEvent(e);
     const pp = paypalTools(this.rf, emit);
-    const tools = [...engineTools(this.rf, emit), ...pp.tools];
+    const tools = [
+      ...engineTools(this.rf, emit, { reminderWriter: (items) => draftReminders(this.rf, items) }),
+      ...pp.tools,
+    ];
     const history = this.sessions.get(sessionId) ?? [];
     const messages: BetaMessageParam[] = [...history, { role: 'user', content: message }];
 

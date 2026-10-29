@@ -1,11 +1,15 @@
 import type { SchemaDescription, TableInfo } from '../types.ts';
-import type { RetrofitMapping } from './schema.ts';
+import { CollectionsPlaybook, recommendedControls, type RetrofitMapping } from './schema.ts';
 
 /**
  * A deterministic, name-based mapper. Used when no Claude API key is configured, and as a hint for the
  * Mapper agent. It handles conventional schemas; the agent handles everything else.
  */
-export function heuristicMapping(schema: SchemaDescription, currency = 'USD'): RetrofitMapping | null {
+export function heuristicMapping(
+  schema: SchemaDescription,
+  currency = 'USD',
+  timezone = 'UTC',
+): RetrofitMapping | null {
   const score = (t: TableInfo, words: string[]) =>
     words.reduce((s, w) => s + (new RegExp(w, 'i').test(t.name) ? 3 : 0), 0) +
     t.columns.reduce((s, c) => s + (words.some((w) => new RegExp(w, 'i').test(c.name)) ? 1 : 0), 0);
@@ -124,6 +128,8 @@ export function heuristicMapping(schema: SchemaDescription, currency = 'USD'): R
       subscription: undefined,
     },
     policies: {},
+    ...recommendedControls(timezone),
+    collections: CollectionsPlaybook.parse({}),
     rationale: {
       'customer.table': `"${customers.name}" has the strongest customer/contact signals`,
       'invoice.table': `"${invoices.name}" has invoice-like columns and references "${customers.name}"`,

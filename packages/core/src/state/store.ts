@@ -66,7 +66,49 @@ CREATE TABLE IF NOT EXISTS discrepancies (
   UNIQUE (entity, legacy_pk, kind, resolved_at)
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS plans (
+  legacy_pk TEXT PRIMARY KEY, paypal_id TEXT NOT NULL, installments INTEGER NOT NULL, installment_amount REAL NOT NULL,
+  total REAL NOT NULL, schedule TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS payments (
+  id TEXT PRIMARY KEY, entity TEXT NOT NULL, legacy_pk TEXT NOT NULL, paypal_id TEXT NOT NULL, kind TEXT NOT NULL,
+  gross REAL NOT NULL, fee REAL, net REAL, currency TEXT NOT NULL, method TEXT, occurred_at TEXT NOT NULL, recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS payments_at ON payments (occurred_at);
 `;
+
+const MIGRATIONS: Array<[table: string, column: string, ddl: string]> = [
+  ['actions', 'policy_reason', 'ALTER TABLE actions ADD COLUMN policy_reason TEXT'],
+  ['actions', 'amount', 'ALTER TABLE actions ADD COLUMN amount REAL'],
+  ['actions', 'run_after', 'ALTER TABLE actions ADD COLUMN run_after TEXT'],
+];
+
+export interface PlanRecord {
+  legacyPk: string;
+  paypalId: string;
+  installments: number;
+  installmentAmount: number;
+  total: number;
+  schedule: Array<{ n: number; due: string; amount: number }>;
+  status: 'active' | 'completed' | 'cancelled';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaymentRecord {
+  id: string;
+  entity: string;
+  legacyPk: string;
+  paypalId: string;
+  kind: 'payment' | 'refund' | 'external_payment' | 'external_refund';
+  gross: number;
+  fee: number | null;
+  net: number | null;
+  currency: string;
+  method: string | null;
+  occurredAt: string;
+  recordedAt: string;
+}
 
 const now = () => new Date().toISOString();
 
@@ -78,6 +120,10 @@ export class StateStore {
     this.db = new Database(file);
     this.db.pragma('journal_mode = WAL');
     this.db.exec(SCHEMA);
+    for (const [table, column, ddl] of MIGRATIONS) {
+      const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
+    }
   }
 
   // ---- links ----
@@ -156,17 +202,20 @@ export class StateStore {
     reason: string;
     policy: PolicyMode;
     status: ActionRecord['status'];
+    policyReason?: string | null;
+    amount?: number | null;
+    runAfter?: string | null;
   }): ActionRecord {
     const dedupe = `${a.kind}:${a.target.entity}:${a.target.legacyPk}`;
-    if (a.status === 'pending') {
+    if (a.status === 'pending' || a.status === 'scheduled') {
       const existing = this.db
-        .prepare(`SELECT * FROM actions WHERE dedupe_key=? AND status='pending'`)
+        .prepare(`SELECT * FROM actions WHERE dedupe_key=? AND status IN ('pending','scheduled')`)
         .get(dedupe);
       if (existing) return toAction(existing);
     }
     const r = this.db
       .prepare(
-        `INSERT INTO actions (origin, kind, target, payload, reason, policy, status, created_at, dedupe_key) VALUES (?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO actions (origin, kind, target, payload, reason, policy, status, created_at, dedupe_key, policy_reason, amount, run_after) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         a.origin,
@@ -178,8 +227,118 @@ export class StateStore {
         a.status,
         now(),
         dedupe,
+        a.policyReason ?? null,
+        a.amount ?? null,
+        a.runAfter ?? null,
       );
     return this.getAction(Number(r.lastInsertRowid))!;
+  }
+  /** Moves an action to "scheduled" (held until runAfter). */
+  scheduleAction(id: number, runAfter: string, policyReason: string) {
+    this.db
+      .prepare(`UPDATE actions SET status='scheduled', run_after=?, policy_reason=? WHERE id=?`)
+      .run(runAfter, policyReason, id);
+  }
+  setPolicyReason(id: number, policy: PolicyMode, policyReason: string) {
+    this.db.prepare(`UPDATE actions SET policy=?, policy_reason=? WHERE id=?`).run(policy, policyReason, id);
+  }
+  /** Scheduled actions whose time has come. */
+  listDue(nowIso: string): ActionRecord[] {
+    return this.db
+      .prepare(`SELECT * FROM actions WHERE status='scheduled' AND run_after <= ? ORDER BY run_after`)
+      .all(nowIso)
+      .map(toAction);
+  }
+  /** Executed actions of a kind since a time: count and summed amount. Used for daily limits. */
+  executedSince(kind: ActionKind, sinceIso: string): { count: number; amount: number } {
+    const r = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(amount),0) AS a FROM actions WHERE kind=? AND status='executed' AND decided_at >= ?`,
+      )
+      .get(kind, sinceIso) as { n: number; a: number };
+    return { count: r.n, amount: r.a };
+  }
+  /** All actions of a kind for one target, newest first. */
+  actionsFor(kind: ActionKind, entity: string, legacyPk: string): ActionRecord[] {
+    return this.db
+      .prepare(`SELECT * FROM actions WHERE kind=? AND dedupe_key=? ORDER BY id DESC`)
+      .all(kind, `${kind}:${entity}:${legacyPk}`)
+      .map(toAction);
+  }
+
+  // ---- payment plans ----
+  upsertPlan(p: Omit<PlanRecord, 'createdAt' | 'updatedAt'>): PlanRecord {
+    const existing = this.getPlan(p.legacyPk);
+    this.db
+      .prepare(
+        `INSERT INTO plans (legacy_pk, paypal_id, installments, installment_amount, total, schedule, status, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?)
+         ON CONFLICT(legacy_pk) DO UPDATE SET paypal_id=excluded.paypal_id, installments=excluded.installments,
+           installment_amount=excluded.installment_amount, total=excluded.total, schedule=excluded.schedule,
+           status=excluded.status, updated_at=excluded.updated_at`,
+      )
+      .run(
+        p.legacyPk,
+        p.paypalId,
+        p.installments,
+        p.installmentAmount,
+        p.total,
+        JSON.stringify(p.schedule),
+        p.status,
+        existing?.createdAt ?? now(),
+        now(),
+      );
+    return this.getPlan(p.legacyPk)!;
+  }
+  getPlan(legacyPk: string): PlanRecord | undefined {
+    const r = this.db.prepare(`SELECT * FROM plans WHERE legacy_pk=?`).get(legacyPk);
+    return r ? toPlan(r) : undefined;
+  }
+  listPlans(status?: PlanRecord['status']): PlanRecord[] {
+    const rows = status
+      ? this.db.prepare(`SELECT * FROM plans WHERE status=? ORDER BY created_at`).all(status)
+      : this.db.prepare(`SELECT * FROM plans ORDER BY created_at`).all();
+    return rows.map(toPlan);
+  }
+  setPlanStatus(legacyPk: string, status: PlanRecord['status']) {
+    this.db.prepare(`UPDATE plans SET status=?, updated_at=? WHERE legacy_pk=?`).run(status, now(), legacyPk);
+  }
+
+  // ---- payments ledger (gross / fee / net) ----
+  /** Inserts a payment once; later calls only fill in a missing fee. */
+  recordPayment(p: Omit<PaymentRecord, 'recordedAt' | 'net'> & { net?: number | null }) {
+    const net = p.net ?? (p.fee != null ? Math.round((p.gross - p.fee) * 100) / 100 : null);
+    this.db
+      .prepare(
+        `INSERT INTO payments (id, entity, legacy_pk, paypal_id, kind, gross, fee, net, currency, method, occurred_at, recorded_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+         ON CONFLICT(id) DO UPDATE SET fee=COALESCE(payments.fee, excluded.fee), net=COALESCE(payments.net, excluded.net)`,
+      )
+      .run(
+        p.id,
+        p.entity,
+        p.legacyPk,
+        p.paypalId,
+        p.kind,
+        p.gross,
+        p.fee,
+        net,
+        p.currency,
+        p.method,
+        p.occurredAt,
+        now(),
+      );
+  }
+  setPaymentFee(id: string, fee: number) {
+    this.db
+      .prepare(`UPDATE payments SET fee=?, net=ROUND(gross-?, 2) WHERE id=? AND fee IS NULL`)
+      .run(fee, fee, id);
+  }
+  listPayments(fromIso?: string, toIso?: string): PaymentRecord[] {
+    return this.db
+      .prepare(`SELECT * FROM payments WHERE occurred_at >= ? AND occurred_at < ? ORDER BY occurred_at, id`)
+      .all(fromIso ?? '0000', toIso ?? '9999')
+      .map(toPayment);
   }
   getAction(id: number): ActionRecord | undefined {
     const r = this.db.prepare(`SELECT * FROM actions WHERE id=?`).get(id);
@@ -321,5 +480,39 @@ function toAction(r: any): ActionRecord {
     createdAt: r.created_at,
     decidedAt: r.decided_at,
     result: r.result ? JSON.parse(r.result) : null,
+    policyReason: r.policy_reason ?? null,
+    amount: r.amount ?? null,
+    runAfter: r.run_after ?? null,
+  };
+}
+
+function toPlan(r: any): PlanRecord {
+  return {
+    legacyPk: r.legacy_pk,
+    paypalId: r.paypal_id,
+    installments: r.installments,
+    installmentAmount: r.installment_amount,
+    total: r.total,
+    schedule: JSON.parse(r.schedule),
+    status: r.status,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+function toPayment(r: any): PaymentRecord {
+  return {
+    id: r.id,
+    entity: r.entity,
+    legacyPk: r.legacy_pk,
+    paypalId: r.paypal_id,
+    kind: r.kind,
+    gross: r.gross,
+    fee: r.fee,
+    net: r.net,
+    currency: r.currency,
+    method: r.method,
+    occurredAt: r.occurred_at,
+    recordedAt: r.recorded_at,
   };
 }

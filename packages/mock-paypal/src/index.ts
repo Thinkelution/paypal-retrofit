@@ -95,14 +95,12 @@ export function createMockPayPal(opts: MockOptions) {
   app.use(express.urlencoded({ extended: false }));
 
   const fail = (res: Response, status: number, name: string, description: string, issue = name) =>
-    res
-      .status(status)
-      .json({
-        name,
-        message: description,
-        debug_id: crypto.randomBytes(6).toString('hex'),
-        details: [{ issue, description }],
-      });
+    res.status(status).json({
+      name,
+      message: description,
+      debug_id: crypto.randomBytes(6).toString('hex'),
+      details: [{ issue, description }],
+    });
 
   const auth = (req: Request, res: Response, next: () => void) => {
     if (!/^Bearer mock-/.test(req.header('authorization') ?? ''))
@@ -301,6 +299,7 @@ export function createMockPayPal(opts: MockOptions) {
     Object.assign(inv, {
       items: b.items ?? inv.items,
       primary_recipients: b.primary_recipients ?? inv.primary_recipients,
+      configuration: b.configuration ?? inv.configuration,
       detail: {
         ...inv.detail,
         ...b.detail,
@@ -676,22 +675,39 @@ td:last-child{text-align:right}button{width:100%;padding:12px;font-size:16px;bor
       )
       .join('');
     const payable = ['SENT', 'UNPAID', 'PARTIALLY_PAID'].includes(inv.status);
+    const pp = inv.configuration?.partial_payment;
+    const partialMin =
+      pp?.allow_partial_payment &&
+      Number(pp.minimum_amount_due?.value ?? 0) < Number(inv.due_amount.value) - 0.005
+        ? Number(pp.minimum_amount_due?.value ?? 0).toFixed(2)
+        : null;
     res.send(
       page(
         `Invoice ${esc(inv.detail.invoice_number)}`,
         `<h2>${esc(inv.invoicer?.business_name ?? 'Merchant')}</h2><p class="muted">Invoice ${esc(inv.detail.invoice_number)} · ${esc(inv.status)}</p>
 <table>${rows}<tr><td><b>Total</b></td><td><b>${esc(inv.amount.value)} ${esc(inv.amount.currency_code)}</b></td></tr></table>
 ${inv.detail.note ? `<p class="muted">${esc(inv.detail.note)}</p>` : ''}
-${payable ? `<form method="post" action="${esc(req.baseUrl)}/mock/invoice/${esc(inv.id)}/pay"><button>Pay ${esc(inv.due_amount.value)} ${esc(inv.amount.currency_code)}</button></form>` : `<p class="ok">${esc(inv.status)}</p>`}`,
+${payable && partialMin ? `<form method="post" action="${esc(req.baseUrl)}/mock/invoice/${esc(inv.id)}/pay?amount=${esc(partialMin)}" style="margin-bottom:10px"><button>Pay instalment ${esc(partialMin)} ${esc(inv.amount.currency_code)}</button></form>` : ''}
+${payable ? `<form method="post" action="${esc(req.baseUrl)}/mock/invoice/${esc(inv.id)}/pay"><button${partialMin ? ' style="background:#334155"' : ''}>Pay ${partialMin ? 'full balance ' : ''}${esc(inv.due_amount.value)} ${esc(inv.amount.currency_code)}</button></form>` : `<p class="ok">${esc(inv.status)}</p>`}
+${inv.payments?.paid_amount ? `<p class="muted">Paid so far: ${esc(inv.payments.paid_amount.value)} ${esc(inv.amount.currency_code)}</p>` : ''}`,
       ),
     );
   });
 
-  async function payInvoice(id: string) {
+  /** Pays an invoice in full, or by a partial amount when the invoice allows partial payments. */
+  async function payInvoice(id: string, partial?: number) {
     const inv = state.invoices[id];
     if (!inv || !['SENT', 'UNPAID', 'PARTIALLY_PAID'].includes(inv.status)) return null;
     decorate(inv);
-    const amount = Number(inv.due_amount.value);
+    const due = Number(inv.due_amount.value);
+    const pp = inv.configuration?.partial_payment;
+    let amount = due;
+    if (partial !== undefined && Number.isFinite(partial) && partial < due) {
+      if (!pp?.allow_partial_payment) return null;
+      const min = Number(pp.minimum_amount_due?.value ?? 0);
+      if (partial + 0.005 < min) return null;
+      amount = Math.round(partial * 100) / 100;
+    }
     const captureId = crypto.randomBytes(8).toString('hex').toUpperCase();
     const fee = Math.round((amount * 0.0349 + 0.49) * 100) / 100;
     inv.payments = inv.payments ?? { transactions: [] };
@@ -701,7 +717,7 @@ ${payable ? `<form method="post" action="${esc(req.baseUrl)}/mock/invoice/${esc(
       payment_date: nowIso().slice(0, 10),
       amount: money(amount, inv.detail.currency_code),
     });
-    inv.status = 'PAID';
+    inv.status = amount + 0.005 >= due ? 'PAID' : 'PARTIALLY_PAID';
     decorate(inv);
     state.transactions.push({
       transaction_info: {
@@ -728,12 +744,14 @@ ${payable ? `<form method="post" action="${esc(req.baseUrl)}/mock/invoice/${esc(
       },
       `Payment completed for ${amount}`,
     );
-    await emit('INVOICING.INVOICE.PAID', inv, `Invoice ${inv.detail.invoice_number} paid`);
+    if (inv.status === 'PAID')
+      await emit('INVOICING.INVOICE.PAID', inv, `Invoice ${inv.detail.invoice_number} paid`);
+    else await emit('INVOICING.INVOICE.UPDATED', inv, `Invoice ${inv.detail.invoice_number} partially paid`);
     return inv;
   }
 
   app.post('/mock/invoice/:id/pay', async (req, res) => {
-    const inv = await payInvoice(req.params.id);
+    const inv = await payInvoice(req.params.id, req.query.amount ? Number(req.query.amount) : undefined);
     res.redirect(303, `${req.baseUrl}/mock/invoice/${req.params.id}${inv ? '?paid=1' : ''}`);
   });
 
@@ -804,7 +822,8 @@ ${s.status === 'APPROVAL_PENDING' ? `<form method="post" action="${esc(req.baseU
     res.json({ ok: true });
   });
   app.post('/mock/api/invoices/:id/pay', async (req, res) => {
-    const inv = await payInvoice(req.params.id);
+    const amount = req.query.amount ?? req.body?.amount;
+    const inv = await payInvoice(req.params.id, amount !== undefined ? Number(amount) : undefined);
     return inv
       ? res.json(decorate(inv))
       : fail(res, 422, 'UNPROCESSABLE_ENTITY', 'Invoice cannot be paid in its current state');

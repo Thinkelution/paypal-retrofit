@@ -252,6 +252,31 @@
   .criteria li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; font-size: 14px; color: var(--ink-2); }
   .criteria b { color: var(--ink); }
 
+  /* use cases */
+  .uc-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+  .uc { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 22px; display: flex; flex-direction: column; gap: 10px; }
+  .uc .quote { font-size: 15px; font-style: italic; color: var(--ink-2); border-left: 3px solid var(--accent); padding-left: 12px; margin: 0; }
+  .uc h3 { font-size: 18px; }
+  .uc p { margin: 0; color: var(--ink-2); font-size: 15px; }
+  .uc ul { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 14px; display: grid; gap: 4px; }
+  .uc .uses { margin-top: auto; display: flex; flex-wrap: wrap; gap: 6px; padding-top: 6px; }
+  .uc .uses span { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+  .decisions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .decisions span { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+  .d-remind { background: var(--warn-soft); color: var(--warn); }
+  .d-plan { background: var(--accent-soft); color: var(--accent); }
+  .d-call { background: var(--bad-soft); color: var(--bad); }
+  .d-hold { background: var(--ok-soft); color: var(--ok); }
+  .d-wait { background: var(--bg-2); color: var(--ink-3); border: 1px solid var(--line); }
+  .showcase { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; margin-top: 32px; }
+  .showcase figure { margin: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); box-shadow: var(--shadow); }
+  .showcase button { padding: 0; border: 0; background: none; cursor: zoom-in; display: block; width: 100%; }
+  .showcase img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; }
+  .showcase figcaption { padding: 14px 18px; border-top: 1px solid var(--line); font-size: 14px; color: var(--ink-2); }
+  .showcase figcaption b { color: var(--ink); display: block; font-size: 15px; }
+  @media (max-width: 980px) { .uc-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .showcase { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 640px) { .uc-grid { grid-template-columns: minmax(0, 1fr); } }
+
   /* faq */
   .faq { display: grid; gap: 12px; max-width: 860px; }
   details { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 0 20px; }
@@ -302,6 +327,7 @@
     </a>
     <nav aria-label="Sections">
       <a href="#how">How it works</a>
+      <a href="#use-cases">Use cases</a>
       <a href="#agents">Agents</a>
       <a href="#safety">Safety</a>
       <a href="#screens">Screens</a>
@@ -328,6 +354,7 @@
       <div class="hero-meta">
         <span>No schema changes</span>
         <span>SQLite, Postgres or CSV</span>
+        <span>Collections, payment plans and cash forecast built in</span>
         <span>Runs offline with a bundled PayPal mock</span>
         <span>PayPal sandbox ready</span>
       </div>
@@ -339,7 +366,7 @@
         <div class="stat"><b>1 command</b><span>to map an existing schema to PayPal objects</span></div>
         <div class="stat"><b>0 changes</b><span>to the business's tables; write-back only to columns it allows</span></div>
         <div class="stat"><b>15 events</b><span>of PayPal webhooks verified and applied</span></div>
-        <div class="stat"><b>3 rules</b><span>auto, confirm or never, for every action an agent proposes</span></div>
+        <div class="stat"><b>6 playbooks</b><span>for collections, plans, refunds, quiet hours, cash forecast and month-end</span></div>
       </div>
     </div>
   </section>
@@ -510,11 +537,95 @@
     </div>
   </section>
 
-  <section id="agents">
+  <section id="use-cases">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Real-world use cases</span>
+        <h2 style="margin-top:14px">Built for how small businesses actually get paid.</h2>
+        <p>Connecting PayPal is step one. Retrofit then runs the receivables work a careful bookkeeper would, with every decision explained in a sentence. Claude writes and advises; the engine decides.</p>
+      </div>
+      <div class="uc-grid">
+        <article class="uc">
+          <p class="quote">“Seventeen invoices are overdue. Who do I chase, and how hard?”</p>
+          <h3>Collections playbook</h3>
+          <p>Every morning, each overdue invoice gets one decision with a reason:</p>
+          <div class="decisions"><span class="d-remind">Remind</span><span class="d-wait">Wait</span><span class="d-hold">Hold</span><span class="d-plan">Offer plan</span><span class="d-call">Call them</span></div>
+          <ul>
+            <li>Friendly at day 3, firm at day 14, final at day 30; at least 5 days apart</li>
+            <li>Holds on open disputes and on “promised to pay” notes</li>
+            <li>Claude writes each reminder from the customer's history</li>
+          </ul>
+          <div class="uses"><span>Invoicing remind</span><span>Claude</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“Can I pay this in two parts?”</p>
+          <h3>Payment plans</h3>
+          <p>One click turns an invoice into instalments using PayPal's own partial payments. The invoice stays one PayPal invoice.</p>
+          <ul>
+            <li>Schedule added to the invoice and sent to the customer</li>
+            <li>“Instalment 1 of 2 received” is written back, not flagged as a problem</li>
+            <li>Reminders follow the instalment dates; done when the last one lands</li>
+          </ul>
+          <div class="uses"><span>Partial payments</span><span>Webhooks</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“A $40 refund shouldn't need me. A $900 one should.”</p>
+          <h3>Approval rules that think in money</h3>
+          <p>Policies are rules, not switches, and every action says which one applied.</p>
+          <ul>
+            <li>Refunds up to $100 run on their own; larger ones wait</li>
+            <li>Daily caps: at most $500 of automatic refunds a day</li>
+            <li>Accepting a dispute claim is never automatic</li>
+          </ul>
+          <div class="uses"><span>Capture refunds</span><span>Policy engine</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“Don't send a payment reminder at 11 p.m. on a Saturday.”</p>
+          <h3>Quiet hours</h3>
+          <p>Customer-facing actions approved out of hours are scheduled for the morning, in the business's own time zone.</p>
+          <ul>
+            <li>Evenings and weekends by default</li>
+            <li>Handles daylight saving; tested on the November change</li>
+            <li><b>Send now</b> when you really mean it</li>
+          </ul>
+          <div class="uses"><span>Scheduler</span><span>Time zones</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“Will the money be in before payroll on the 15th?”</p>
+          <h3>Risk and cash forecast</h3>
+          <p>Learned from the business's own paid invoices, so it knows who always pays late.</p>
+          <ul>
+            <li>Risk 1–99 per invoice, with the reasons listed</li>
+            <li>Expected pay date from each customer's usual lateness</li>
+            <li>9-week forecast with plans and retainers; assumptions stated</li>
+          </ul>
+          <div class="uses"><span>Customer history</span><span>Explainable</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“My accountant needs PayPal's fees split out.”</p>
+          <h3>Month-end close</h3>
+          <p>A payments ledger with gross, PayPal fee and net for every payment, tied to the original invoice number.</p>
+          <ul>
+            <li>Fees from capture webhooks, back-filled from Transaction Search</li>
+            <li>Exports as CSV, a Xero bank statement or a QuickBooks upload</li>
+            <li>Fee lines reconcile to the PayPal payout</li>
+          </ul>
+          <div class="uses"><span>Transaction Search</span><span>Xero · QuickBooks</span></div>
+        </article>
+      </div>
+      <div class="showcase">
+        <figure><button type="button" data-full="assets/collections.png"><img src="assets/collections.png" width="1440" height="900" alt="Collections page: the playbook's steps and quiet hours above a grid where each overdue invoice has a decision such as remind or hold, a tone and a reason." loading="lazy"></button><figcaption><b>Collections</b>Twelve friendly first reminders, one payment-plan offer and one promise-to-pay hold, each with its reason.</figcaption></figure>
+        <figure><button type="button" data-full="assets/insights.png"><img src="assets/insights.png" width="1440" height="1180" alt="Insights page: expected cash for the next 30 and 60 days, amount at high risk, a weekly forecast chart of invoices and retainers, and tables of late-payment risk and customer payment behaviour." loading="lazy"></button><figcaption><b>Insights</b>Cash expected week by week, the riskiest invoices with reasons, and how each customer really pays.</figcaption></figure>
+      </div>
+      <p class="muted" style="margin-top:20px">Every scenario, with its logic and how to try it: <a href="https://github.com/Thinkelution/paypal-retrofit/blob/main/docs/use-cases.md">docs/use-cases.md</a>.</p>
+    </div>
+  </section>
+
+  <section class="alt" id="agents">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">AI agents</span>
-        <h2 style="margin-top:14px">Three agents, one job each.</h2>
+        <h2 style="margin-top:14px">Claude agents, one job each.</h2>
         <p>Built with Claude through the official Anthropic SDK. The default model is <code>claude-opus-5-5</code>.</p>
       </div>
       <div class="agents">
@@ -537,9 +648,10 @@
             <li>Ledger search and read-only SQL on the legacy database</li>
             <li>PayPal reads through PayPal's Agent Toolkit</li>
             <li>Batches reminders, recorded payments and refunds as proposals</li>
+            <li>Runs the collections playbook; a writer drafts each reminder in the right tone</li>
             <li>Only claims an action happened when the engine says it ran</li>
           </ul>
-          <div class="prompts"><span>Who owes us the most?</span><span>Why is INV-1042 unpaid?</span><span>Remind everything 14+ days overdue</span></div>
+          <div class="prompts"><span>Who owes us the most?</span><span>What comes in before the 15th?</span><span>Chase everything overdue</span><span>What did PayPal cost us in October?</span></div>
         </article>
         <article class="agent">
           <span class="role">Support</span>
@@ -556,7 +668,7 @@
     </div>
   </section>
 
-  <section class="alt" id="safety">
+  <section id="safety">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Safety</span>
@@ -570,9 +682,11 @@
             <tbody>
               <tr><td>Create, send, update invoices</td><td><span class="k auto">auto</span></td></tr>
               <tr><td>Send reminders</td><td><span class="k confirm">confirm</span></td></tr>
-              <tr><td>Record a payment made outside PayPal</td><td><span class="k confirm">confirm</span></td></tr>
+              <tr><td>Record a payment made outside PayPal</td><td><span class="k auto">auto</span> <span class="muted">up to 250 USD, then</span> <span class="k confirm">confirm</span></td></tr>
               <tr><td>Cancel an invoice</td><td><span class="k confirm">confirm</span></td></tr>
-              <tr><td>Refund</td><td><span class="k confirm">confirm</span></td></tr>
+              <tr><td>Refund up to 100 USD</td><td><span class="k auto">auto</span> <span class="muted">within 500 USD a day</span></td></tr>
+              <tr><td>Larger refunds</td><td><span class="k confirm">confirm</span></td></tr>
+              <tr><td>Offer a payment plan</td><td><span class="k confirm">confirm</span></td></tr>
               <tr><td>Create or cancel a subscription</td><td><span class="k confirm">confirm</span></td></tr>
               <tr><td>Accept a dispute claim</td><td><span class="k never">never</span></td></tr>
             </tbody>
@@ -582,13 +696,14 @@
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg><div><b>Personal data is masked before it reaches a model</b>Emails, phone digits and street numbers are hidden in schema samples and tool results.</div></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg><div><b>Agent SQL is read-only</b>A single SELECT on a read-only connection or read-only transaction.</div></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg><div><b>Writes only where you allow</b>Retrofit never alters the schema and only fills the write-back columns named in the mapping.</div></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg><div><b>Quiet hours and daily caps</b>Reminders approved out of hours wait for the morning; automatic refunds and reminders stop at a daily limit and ask a person.</div></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg><div><b>Sandbox first</b>Production mode is refused unless it is explicitly enabled; secrets live only in the environment and are redacted from logs.</div></li>
         </ul>
       </div>
     </div>
   </section>
 
-  <section id="screens">
+  <section class="alt" id="screens">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">The console</span>
@@ -605,7 +720,7 @@
     </div>
   </section>
 
-  <section class="alt" id="paypal">
+  <section id="paypal">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">PayPal platform</span>
@@ -628,7 +743,7 @@
     </div>
   </section>
 
-  <section id="start">
+  <section class="alt" id="start">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Quick start</span>
@@ -674,7 +789,7 @@
     </div>
   </section>
 
-  <section class="alt" id="hackathon">
+  <section id="hackathon">
     <div class="wrap">
       <div class="hack">
         <div>
@@ -696,7 +811,7 @@
     </div>
   </section>
 
-  <section id="faq">
+  <section class="alt" id="faq">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">FAQ</span>
@@ -705,7 +820,7 @@
       <div class="faq">
         <details><summary>Does it change my database?</summary><p>No schema changes, ever. Retrofit reads your tables and writes only to the columns your mapping names, such as a PayPal invoice id or a paid date. If you have no such columns, it keeps the links in its own state store. For CSV sources it writes to sidecar files and leaves the originals untouched.</p></details>
         <details><summary>Do I need a PayPal account to try it?</summary><p>No. The demo ships with a local stand-in for the PayPal endpoints retrofit uses, with signed webhooks and customer pay pages. To use the real PayPal sandbox, create a free developer app and run the demo with <code>--sandbox</code>.</p></details>
-        <details><summary>Can the AI move money on its own?</summary><p>Only if you let it. Agents can only propose actions; each kind of action has a policy (auto, confirm or never). Refunds, cancellations and reminders wait for your approval by default, and accepting disputes is refused.</p></details>
+        <details><summary>Can the AI move money on its own?</summary><p>Only within rules you set. Agents can only propose actions; each kind of action has a policy (auto, confirm or never), optionally by amount, with daily caps. By default small refunds run on their own, larger ones, cancellations and reminders wait for your approval, and accepting disputes is refused.</p></details>
         <details><summary>Which AI model does it use?</summary><p>Claude through the official Anthropic SDK, defaulting to <code>claude-opus-5-5</code>. You can choose another model with <code>RETROFIT_MODEL</code>.</p></details>
         <details><summary>Is it production ready?</summary><p>Not yet. It is built and tested against PayPal's sandbox APIs and refuses production mode unless explicitly enabled. Treat it as a strong starting point, not a finished payments product.</p></details>
         <details><summary>Is this an official PayPal product?</summary><p>No. paypal-retrofit is an independent open-source project built on PayPal's public APIs and Agent Toolkit. It is not affiliated with or endorsed by PayPal.</p></details>

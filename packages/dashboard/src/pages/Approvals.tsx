@@ -7,7 +7,15 @@ import { useLive } from '../hooks';
 
 export function Approvals({ dark, toast }: { dark: boolean; toast: (m: string) => void }) {
   const [showAll, setShowAll] = useState(false);
-  const { data, reload } = useLive(() => api.actions(showAll ? undefined : 'pending'), [showAll]);
+  const { data, reload } = useLive(
+    async () =>
+      showAll
+        ? api.actions()
+        : [...(await api.actions('pending')), ...(await api.actions('scheduled'))].sort(
+            (a, b) => b.id - a.id,
+          ),
+    [showAll],
+  );
   const [busy, setBusy] = useState<number | null>(null);
 
   const decide = async (a: Action, approve: boolean) => {
@@ -17,6 +25,19 @@ export function Approvals({ dark, toast }: { dark: boolean; toast: (m: string) =
       toast(
         `${KIND_LABEL[a.kind] ?? a.kind} for ${a.target.label}: ${r.status}${r.status === 'failed' ? ` (${r.result?.message})` : ''}`,
       );
+    } catch (e) {
+      toast((e as Error).message);
+    } finally {
+      setBusy(null);
+      reload();
+    }
+  };
+
+  const runNow = async (a: Action) => {
+    setBusy(a.id);
+    try {
+      const r = await api.runNow(a.id);
+      toast(`${KIND_LABEL[a.kind] ?? a.kind} for ${a.target.label}: ${r.status}`);
     } catch (e) {
       toast((e as Error).message);
     } finally {
@@ -37,22 +58,64 @@ export function Approvals({ dark, toast }: { dark: boolean; toast: (m: string) =
         width: 170,
         valueGetter: (p) => p.data?.target.label ?? p.data?.target.legacyPk,
       },
-      { field: 'reason', flex: 1, minWidth: 260, tooltipField: 'reason', wrapText: true },
+      { field: 'reason', flex: 1.2, minWidth: 200, tooltipField: 'reason', wrapText: true },
+      {
+        field: 'policyReason',
+        headerName: 'Why it waits',
+        flex: 1,
+        minWidth: 170,
+        wrapText: true,
+        tooltipField: 'policyReason',
+        cellClass: 'muted',
+      },
+      {
+        field: 'amount',
+        width: 100,
+        type: 'rightAligned',
+        valueFormatter: (p) => (p.value == null ? '' : Number(p.value).toFixed(2)),
+        cellClass: 'num',
+      },
       {
         field: 'origin',
         headerName: 'Asked by',
-        width: 110,
+        width: 105,
         cellRenderer: (p: any) => <Pill tone={p.value === 'agent' ? 'accent' : ''}>{p.value}</Pill>,
       },
-      { field: 'status', width: 120, cellRenderer: ActionStatusCell },
-      { field: 'createdAt', headerName: 'When', width: 110, valueFormatter: (p) => ago(p.value) },
+      {
+        field: 'status',
+        width: 150,
+        cellRenderer: (p: any) => (
+          <div style={{ lineHeight: 1.3, paddingTop: 8 }}>
+            <ActionStatusCell {...p} />
+            {p.data?.status === 'scheduled' && p.data.runAfter && (
+              <div className="muted" style={{ fontSize: 11 }}>
+                {new Date(p.data.runAfter).toLocaleString([], {
+                  weekday: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </div>
+            )}
+          </div>
+        ),
+      },
+      { field: 'createdAt', headerName: 'When', width: 95, valueFormatter: (p) => ago(p.value) },
       {
         headerName: '',
         width: 190,
         sortable: false,
         filter: false,
         cellRenderer: (p: { data: Action }) =>
-          p.data.status === 'pending' ? (
+          p.data.status === 'scheduled' ? (
+            <div className="actions-row" style={{ paddingTop: 6 }}>
+              <button className="btn primary sm" disabled={busy === p.data.id} onClick={() => runNow(p.data)}>
+                Send now
+              </button>
+              <button className="btn sm" disabled={busy === p.data.id} onClick={() => decide(p.data, false)}>
+                Cancel
+              </button>
+            </div>
+          ) : p.data.status === 'pending' ? (
             <div className="actions-row" style={{ paddingTop: 6 }}>
               <button
                 className="btn primary sm"
@@ -81,7 +144,8 @@ export function Approvals({ dark, toast }: { dark: boolean; toast: (m: string) =
       <div className="panel-head">
         <h2>Approvals</h2>
         <span className="muted">
-          Actions whose policy is “confirm” wait here. Nothing in PayPal changes until you approve.
+          Actions your rules send for approval, and customer-facing ones held for quiet hours. Nothing in
+          PayPal changes until you approve.
         </span>
         <span className="spacer" />
         <label className="muted">

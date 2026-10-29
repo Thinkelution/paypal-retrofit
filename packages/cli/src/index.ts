@@ -2,7 +2,19 @@ import 'dotenv/config';
 import { Command } from 'commander';
 import { demo } from './commands/demo.ts';
 import { init } from './commands/init.ts';
-import { actions, chat, doctor, registerWebhook, runReconcile, serve, status, sync } from './commands/run.ts';
+import {
+  actions,
+  chat,
+  collections,
+  doctor,
+  exportJournal,
+  forecast,
+  registerWebhook,
+  runReconcile,
+  serve,
+  status,
+  sync,
+} from './commands/run.ts';
 import { c } from './ui.ts';
 
 const program = new Command()
@@ -56,6 +68,7 @@ program
   .description('List pending actions, or approve/reject one')
   .option('--approve <id>')
   .option('--reject <id>')
+  .option('--run-now <id>', 'run a scheduled action now, ignoring quiet hours')
   .option('--all', 'include finished actions')
   .action(run((o) => actions({ ...o, config: cfg() })));
 
@@ -77,6 +90,30 @@ program
   .command('register')
   .requiredOption('--url <url>', 'public HTTPS URL ending in /webhooks/paypal')
   .action(run((o) => registerWebhook({ ...o, config: cfg() })));
+
+program
+  .command('collections')
+  .description('Collections playbook: who to remind, hold, offer a payment plan or call; --run queues the actions')
+  .option('--run', 'queue the reminders and payment-plan offers (policies still apply)')
+  .option('--no-ai', 'use template reminders even if Claude is configured')
+  .action(run((o) => collections({ ...o, config: cfg() })));
+
+program
+  .command('forecast')
+  .description('Cash expected over the next 9 weeks and the riskiest invoices')
+  .action(run(() => forecast({ config: cfg() })));
+
+program
+  .command('export')
+  .description('Accountant-ready exports')
+  .command('journal')
+  .description('Payments ledger with gross, PayPal fee and net')
+  .option('--month <YYYY-MM>')
+  .option('--from <YYYY-MM-DD>')
+  .option('--to <YYYY-MM-DD>')
+  .option('--format <format>', 'generic | xero | quickbooks', 'generic')
+  .option('-o, --out <file>')
+  .action(run((o) => exportJournal({ ...o, config: cfg() })));
 
 program
   .command('status')

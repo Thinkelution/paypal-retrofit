@@ -47,6 +47,7 @@ export const ACTION_KINDS = [
   'create_subscription',
   'cancel_subscription',
   'accept_dispute',
+  'offer_payment_plan',
 ] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
@@ -67,8 +68,14 @@ export interface ActionRecord {
   payload: Record<string, unknown>;
   reason: string;
   policy: PolicyMode;
-  status: 'pending' | 'executed' | 'rejected' | 'failed' | 'skipped';
+  status: 'pending' | 'scheduled' | 'executed' | 'rejected' | 'failed' | 'skipped';
   createdAt: string;
   decidedAt: string | null;
   result: unknown;
+  /** Why the policy engine chose this mode (rule, limit, quiet hours). */
+  policyReason: string | null;
+  /** Money involved, when the action has an amount. */
+  amount: number | null;
+  /** For scheduled actions: when they will run. */
+  runAfter: string | null;
 }

@@ -1,5 +1,6 @@
 import type { Retrofit } from './engine.ts';
 import { loadInvoices, loadSubscriptions } from './entities.ts';
+import { cashForecast, invoiceRisks } from './insights.ts';
 import { todayIso } from './util.ts';
 
 export interface LedgerRow {
@@ -26,6 +27,11 @@ export interface LedgerRow {
   discrepancies: string[];
   pendingActions: number;
   inSync: boolean;
+  riskBand: 'low' | 'medium' | 'high' | null;
+  riskScore: number | null;
+  riskFactors: string[];
+  expectedPayDate: string | null;
+  plan: { installments: number; covered: number; nextDue: string | null; behind: number } | null;
 }
 
 export async function ledger(rf: Retrofit): Promise<LedgerRow[]> {
@@ -42,6 +48,7 @@ export async function ledger(rf: Retrofit): Promise<LedgerRow[]> {
     pending.set(k, (pending.get(k) ?? 0) + 1);
   }
 
+  const risks = new Map((await invoiceRisks(rf, today)).map((r) => [r.legacyPk, r]));
   const rows: LedgerRow[] = [];
   for (const inv of await loadInvoices(rf.source, rf.mapping)) {
     const key = `invoice:${inv.pk}`;
@@ -78,6 +85,11 @@ export async function ledger(rf: Retrofit): Promise<LedgerRow[]> {
       discrepancies: disc.get(key) ?? [],
       pendingActions: pending.get(key) ?? 0,
       inSync: inSync && !disc.get(key)?.length,
+      riskBand: risks.get(inv.pk)?.band ?? null,
+      riskScore: risks.get(inv.pk)?.score ?? null,
+      riskFactors: risks.get(inv.pk)?.factors ?? [],
+      expectedPayDate: risks.get(inv.pk)?.expectedPayDate ?? null,
+      plan: risks.get(inv.pk)?.plan ?? null,
     });
   }
   for (const s of await loadSubscriptions(rf.source, rf.mapping)) {
@@ -107,6 +119,11 @@ export async function ledger(rf: Retrofit): Promise<LedgerRow[]> {
       discrepancies: disc.get(key) ?? [],
       pendingActions: pending.get(key) ?? 0,
       inSync: !disc.get(key)?.length,
+      riskBand: null,
+      riskScore: null,
+      riskFactors: [],
+      expectedPayDate: null,
+      plan: null,
     });
   }
   return rows;
@@ -119,6 +136,7 @@ export async function summary(rf: Retrofit) {
     Math.round(xs.reduce((s, r) => s + f(r), 0) * 100) / 100;
   const open = inv.filter((r) => r.legacyState === 'open');
   const overdue = open.filter((r) => (r.daysOverdue ?? 0) > 0);
+  const forecast = await cashForecast(rf);
   return {
     business: rf.config.business.name,
     currency: rf.mapping.currency,
@@ -144,5 +162,10 @@ export async function summary(rf: Retrofit) {
     lastSyncAt: rf.state.getMeta('lastSyncAt') ?? null,
     lastReconcileAt: rf.state.getMeta('lastReconcileAt') ?? null,
     lastWebhookAt: rf.state.listEvents(1)[0]?.receivedAt ?? null,
+    scheduledActions: rf.state.listActions('scheduled').length,
+    activePlans: rf.state.listPlans('active').length,
+    expectedNext30: forecast.next30,
+    atRisk: forecast.atRisk,
+    lastCollectionsAt: rf.state.getMeta('lastCollectionsAt') ?? null,
   };
 }

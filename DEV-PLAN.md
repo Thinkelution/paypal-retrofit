@@ -20,6 +20,8 @@ Read this whole document before writing code. Sections 1 and 2 are non-negotiabl
 - `server`, `cli` (`init`, `sync`, `reconcile`, `actions`, `serve`, `chat`, `webhooks register`, `status`, `doctor`, `demo`), `dashboard` (AG Grid ledger, approvals, discrepancies, editable mapping, webhook activity, agent panel, record drawer, dispute draft).
 - README, JUDGES, ARCHITECTURE, render.yaml, docs/demo-script.md, docs/devpost.md, scripts/sandbox-smoke.ts.
 
+**Advanced features (added 2026-10-29, second pass; 27 tests):** collections playbook with AI-written reminders; payment plans on PayPal partial payments; approval rules by amount, daily limits and quiet hours with scheduled actions; late-payment risk, customer payment profiles and a 9-week cash forecast; a payments ledger with PayPal fees and CSV / Xero / QuickBooks exports. Scenarios and logic: docs/use-cases.md.
+
 **Changes from the plan:** the CLI runs TypeScript through `tsx` (no `tsup` build step); the Ops agent gets PayPal Agent Toolkit **read** tools only, and every write goes through `propose_action`; `demo` serves console, Fernhill and mock PayPal from one process, which is also what Render runs; the Postgres adapter is implemented but only exercised by typecheck, not by a live database test.
 
 **Not done / not verified (owner action needed):**

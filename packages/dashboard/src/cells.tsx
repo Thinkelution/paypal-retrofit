@@ -81,6 +81,19 @@ export function KindCell(p: ICellRendererParams) {
 
 export function ActionStatusCell(p: ICellRendererParams) {
   const tone =
-    { executed: 'ok', pending: 'accent', failed: 'bad', rejected: '', skipped: '' }[p.value as string] ?? '';
+    { executed: 'ok', pending: 'accent', scheduled: 'info', failed: 'bad', rejected: '', skipped: '' }[
+      p.value as string
+    ] ?? '';
   return <Pill tone={tone}>{humanize(p.value)}</Pill>;
+}
+
+export function RiskCell({ band, score }: { band?: string | null; score?: number | null }) {
+  if (!band) return <span className="muted">—</span>;
+  const tone = band === 'high' ? 'bad' : band === 'medium' ? 'warn' : 'ok';
+  return (
+    <Pill tone={tone}>
+      {band}
+      {score != null ? ` · ${score}` : ''}
+    </Pill>
+  );
 }

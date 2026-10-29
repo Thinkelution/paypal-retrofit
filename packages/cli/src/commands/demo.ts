@@ -63,7 +63,9 @@ export async function demo(opts: DemoOptions & { sandbox?: boolean }) {
           : 'Mapping the Fernhill schema with the heuristic mapper…',
       ),
     );
-    const r = await proposeMapping(schema);
+    const r = await proposeMapping(schema, {
+      timezone: process.env.RETROFIT_TIMEZONE ?? 'America/Los_Angeles',
+    });
     if (!r.mapping) throw new Error('Could not map the demo schema');
     fs.writeFileSync(
       path.join(dir, 'retrofit.map.json'),
@@ -122,7 +124,7 @@ export async function demo(opts: DemoOptions & { sandbox?: boolean }) {
           reset: async () => {
             seedInto(fernDb);
             rf.state.db.exec(
-              'DELETE FROM links; DELETE FROM events; DELETE FROM actions; DELETE FROM discrepancies; DELETE FROM meta;',
+              'DELETE FROM links; DELETE FROM events; DELETE FROM actions; DELETE FROM discrepancies; DELETE FROM meta; DELETE FROM plans; DELETE FROM payments;',
             );
             mock.reset();
             await ensureWebhook();

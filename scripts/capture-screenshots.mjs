@@ -11,9 +11,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const base = (process.argv[2] ?? 'http://localhost:8787').replace(/\/$/, '');
+const args = process.argv.slice(2);
+const onlyIdx = args.indexOf('--only');
+const only = onlyIdx >= 0 ? args.splice(onlyIdx, 2)[1]?.split(',') : null;
+const base = (args[0] ?? 'http://localhost:8787').replace(/\/$/, '');
 const chrome =
-  process.argv[3] ??
+  args[1] ??
   process.env.CHROME_PATH ??
   [
     'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -102,6 +105,8 @@ async function session() {
 const SHOTS = [
   { file: 'console.png', url: '/', w: 1440, h: 900 },
   { file: 'drawer.png', url: '/', w: 1440, h: 900, click: 'INV-1022' },
+  { file: 'collections.png', url: '/#collections', w: 1440, h: 900 },
+  { file: 'insights.png', url: '/#insights', w: 1440, h: 1180 },
   { file: 'mapping.png', url: '/#mapping', w: 1440, h: 1000 },
   { file: 'discrepancies.png', url: '/#discrepancies', w: 1440, h: 760 },
   { file: 'approvals.png', url: '/#approvals', w: 1440, h: 760 },
@@ -123,7 +128,7 @@ try {
       scheme: 'light',
     });
 
-  for (const s of SHOTS) {
+  for (const s of SHOTS.filter((x) => !only || only.includes(x.file))) {
     const page = await session();
     await page.send('Page.enable');
     await page.send('Emulation.setDeviceMetricsOverride', {
@@ -169,5 +174,9 @@ try {
 } finally {
   proc.kill();
   await sleep(300);
-  fs.rmSync(profile, { recursive: true, force: true });
+  try {
+    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+  } catch {
+    // Chrome can hold files for a moment on Windows; the temp folder is harmless.
+  }
 }

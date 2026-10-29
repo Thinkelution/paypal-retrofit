@@ -8,6 +8,7 @@ export interface ReconcileReport {
   fixed: string[];
   discrepancies: number;
   errors: string[];
+  feesFilled?: number;
 }
 
 /**
@@ -123,8 +124,39 @@ export async function reconcile(rf: Retrofit): Promise<ReconcileReport> {
       rf.state.resolveDiscrepancy(d.id, 'No longer detected by reconciliation');
     }
   }
+  report.feesFilled = await backfillFees(rf).catch((e) => {
+    report.errors.push(`fees: ${(e as Error).message}`);
+    return 0;
+  });
   report.discrepancies = rf.state.listDiscrepancies().length;
   rf.state.setMeta('lastReconcileAt', new Date().toISOString());
   rf.emit('reconcile', report);
   return report;
+}
+
+/**
+ * Fills PayPal fees for payments whose capture webhook never arrived, from Transaction Search
+ * (PayPal can take a few hours to list sandbox transactions there).
+ */
+export async function backfillFees(rf: Retrofit): Promise<number> {
+  const missing = rf.state.listPayments().filter((p) => p.kind === 'payment' && p.fee === null);
+  if (missing.length === 0) return 0;
+  const oldest = missing.reduce((m, p) => (p.occurredAt < m ? p.occurredAt : m), missing[0]!.occurredAt);
+  const start = new Date(Math.max(Date.parse(oldest.slice(0, 10)) - 86400000, Date.now() - 30 * 86400000));
+  const tx = await rf.paypal.listTransactions(start, new Date());
+  const fees = new Map<string, number>();
+  for (const t of tx.transaction_details ?? []) {
+    const info = t.transaction_info ?? {};
+    if (info.transaction_id && info.fee_amount?.value !== undefined)
+      fees.set(String(info.transaction_id), Math.abs(Number(info.fee_amount.value)));
+  }
+  let filled = 0;
+  for (const p of missing) {
+    const fee = fees.get(p.id);
+    if (fee !== undefined) {
+      rf.state.setPaymentFee(p.id, fee);
+      filled++;
+    }
+  }
+  return filled;
 }

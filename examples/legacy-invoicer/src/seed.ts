@@ -38,6 +38,9 @@ const CUSTOMERS: Array<[string, string, string, string, string, string]> = [
   ['Marcus Bell', 'marcus.bell@example.com', '120 River Pkwy', 'Tacoma', 'WA', '98401'],
 ];
 
+/** Customers who habitually pay late (Daniel Reyes, Tom Whitaker, Kofi Mensah). */
+const LATE_PAYERS = new Set([2, 4, 6]);
+
 const SERVICES: Array<[string, string, number]> = [
   ['Portrait session', 'One-hour studio portrait session, 20 edited images', 250],
   ['Family session', 'Outdoor family session, up to 6 people', 380],
@@ -132,8 +135,19 @@ export function seedInto(db: Database.Database, opts: Omit<SeedOptions, 'file'> 
       else if (ageDays > 45) status = rand() < 0.75 ? 'paid' : 'overdue';
       else if (today > due) status = 'overdue';
       else status = 'sent';
-      const paidAt = status === 'paid' ? iso(addDays(issued, 3 + Math.floor(rand() * 10))) : null;
-      const notes = k === 28 ? 'Customer asked to split payment; agreed by phone' : null;
+      // Three customers habitually pay 1–4 weeks late; everyone else pays within the terms.
+      const late = LATE_PAYERS.has(customerId);
+      const roll = status === 'paid' ? rand() : 0;
+      const paidAt =
+        status === 'paid'
+          ? iso(late ? addDays(due, 6 + Math.floor(roll * 20)) : addDays(issued, 3 + Math.floor(roll * 10)))
+          : null;
+      const notes =
+        k === 28
+          ? 'Customer asked to split payment; agreed by phone'
+          : k === 32
+            ? 'Promised to pay by the end of the week (phone call)'
+            : null;
       const r = insInvoice.run(
         number,
         customerId,

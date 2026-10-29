@@ -22,6 +22,11 @@ export interface LedgerRow {
   discrepancies: string[];
   pendingActions: number;
   inSync: boolean;
+  riskBand: 'low' | 'medium' | 'high' | null;
+  riskScore: number | null;
+  riskFactors: string[];
+  expectedPayDate: string | null;
+  plan: { installments: number; covered: number; nextDue: string | null; behind: number } | null;
 }
 
 export interface Summary {
@@ -43,6 +48,11 @@ export interface Summary {
   lastSyncAt: string | null;
   lastReconcileAt: string | null;
   lastWebhookAt: string | null;
+  scheduledActions: number;
+  activePlans: number;
+  expectedNext30: number;
+  atRisk: number;
+  lastCollectionsAt: string | null;
 }
 
 export interface Action {
@@ -57,6 +67,9 @@ export interface Action {
   createdAt: string;
   decidedAt: string | null;
   result: any;
+  policyReason: string | null;
+  amount: number | null;
+  runAfter: string | null;
 }
 
 export interface Discrepancy {
@@ -94,6 +107,103 @@ export interface Config {
   source: { kind: string };
   demo: { legacyAppPath: string; mockPath: string } | null;
   webhookConfigured: boolean;
+  controls: {
+    rules: Array<{ kind: string; mode: string; maxAmount?: number; minAmount?: number; note?: string }>;
+    limits: Array<{ kind: string; perDay?: number; amountPerDay?: number }>;
+    quietHours: { start: string; end: string; timezone: string; weekends: boolean; kinds: string[] } | null;
+    quietNow: boolean;
+    collections: { steps: Array<{ afterDaysOverdue: number; tone: string }>; minDaysBetween: number };
+  };
+}
+
+export interface CollectionItem {
+  legacyPk: string;
+  number: string;
+  customer: string;
+  amountDue: number;
+  due: string | null;
+  daysOverdue: number;
+  remindersSent: number;
+  lastReminderAt: string | null;
+  decision: 'remind' | 'wait' | 'hold' | 'plan' | 'escalate';
+  tone: string | null;
+  step: number | null;
+  reason: string;
+  nextReminderOn: string | null;
+  risk: 'low' | 'medium' | 'high' | null;
+  score: number | null;
+  instalment: { n: number; of: number; amount: number; due: string } | null;
+}
+
+export interface InvoiceRisk {
+  legacyPk: string;
+  number: string;
+  customer: string;
+  amountDue: number;
+  daysOverdue: number;
+  score: number;
+  band: 'low' | 'medium' | 'high';
+  expectedPayDate: string;
+  factors: string[];
+  plan: { installments: number; covered: number; nextDue: string | null; behind: number } | null;
+}
+
+export interface CustomerProfile {
+  customerPk: string;
+  name: string;
+  invoices: number;
+  averageInvoice: number;
+  paidCount: number;
+  onTimeRate: number | null;
+  medianDaysLate: number | null;
+  worstDaysLate: number | null;
+  openCount: number;
+  openAmount: number;
+  overdueAmount: number;
+  disputes: number;
+  behaviour: string;
+}
+
+export interface Insights {
+  forecast: {
+    currency: string;
+    weeks: Array<{
+      start: string;
+      end: string;
+      expected: number;
+      fromInvoices: number;
+      fromSubscriptions: number;
+      items: Array<{ label: string; amount: number; kind: string }>;
+    }>;
+    next30: number;
+    next60: number;
+    atRisk: number;
+    overdueTotal: number;
+    assumptions: string[];
+  };
+  risks: InvoiceRisk[];
+  customers: CustomerProfile[];
+  plans: Array<{
+    legacyPk: string;
+    installments: number;
+    installmentAmount: number;
+    total: number;
+    status: string;
+    schedule: Array<{ n: number; due: string; amount: number }>;
+  }>;
+}
+
+export interface MonthSummary {
+  month: string;
+  currency: string;
+  paypalPayments: number;
+  grossCollected: number;
+  fees: number;
+  feesMissing: number;
+  net: number;
+  refunds: number;
+  paidOutsidePayPal: number;
+  effectiveFeeRate: number | null;
 }
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -135,6 +245,17 @@ export const api = {
   resetDemo: () => req('POST', '/api/demo/reset'),
   demoDispute: (legacyPk: string) => req<any>('POST', '/api/demo/dispute', { legacyPk }),
   resetAgent: (sessionId: string) => req('POST', '/api/agent/reset', { sessionId }),
+  runNow: (id: number) => req<Action>('POST', `/api/actions/${id}/run-now`),
+  collections: () => req<CollectionItem[]>('GET', '/api/collections'),
+  runCollections: (body: { ai?: boolean; only?: string[] }) =>
+    req<{
+      items: CollectionItem[];
+      proposed: Array<{ item: CollectionItem; action: Action }>;
+      writer: string;
+    }>('POST', '/api/collections/run', body),
+  insights: () => req<Insights>('GET', '/api/insights'),
+  monthSummary: (month: string) => req<MonthSummary>('GET', `/api/month-summary?month=${month}`),
+  journalUrl: (month: string, format: string) => `/api/export/journal.csv?month=${month}&format=${format}`,
 };
 
 export type AgentEvent =
@@ -195,6 +316,7 @@ export const KIND_LABEL: Record<string, string> = {
   create_subscription: 'Create subscription',
   cancel_subscription: 'Cancel subscription',
   accept_dispute: 'Accept dispute',
+  offer_payment_plan: 'Offer payment plan',
 };
 
 export const DISCREPANCY_LABEL: Record<string, string> = {

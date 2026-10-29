@@ -2,7 +2,7 @@ import type { ColDef, GridApi, RowClassParams, SelectionChangedEvent } from 'ag-
 import { AgGridReact } from 'ag-grid-react';
 import { useMemo, useRef, useState } from 'react';
 import { api, fmtMoney, type Config, type LedgerRow } from '../api';
-import { LegacyStatusCell, OverdueCell, PayPalStatusCell, SyncCell } from '../cells';
+import { LegacyStatusCell, OverdueCell, PayPalStatusCell, SyncCell, RiskCell } from '../cells';
 
 type View = 'all' | 'open' | 'overdue' | 'attention' | 'paid' | 'subscriptions';
 
@@ -92,6 +92,21 @@ export function Ledger(props: {
         cellRenderer: OverdueCell,
         filter: 'agNumberColumnFilter',
         sort: view === 'overdue' ? 'desc' : undefined,
+      },
+      {
+        field: 'riskScore',
+        headerName: 'Risk',
+        width: 120,
+        cellRenderer: (p: any) => <RiskCell band={p.data?.riskBand} score={p.value} />,
+        tooltipValueGetter: (p) => p.data?.riskFactors.join('\n'),
+        filter: 'agNumberColumnFilter',
+      },
+      {
+        field: 'expectedPayDate',
+        headerName: 'Expected',
+        width: 115,
+        valueFormatter: (p) =>
+          p.data?.plan ? `plan ${p.data.plan.covered}/${p.data.plan.installments}` : (p.value ?? ''),
       },
       {
         headerName: 'Sync',

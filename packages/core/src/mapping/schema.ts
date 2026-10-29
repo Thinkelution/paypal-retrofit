@@ -94,7 +94,56 @@ export const DEFAULT_POLICIES: Record<(typeof ACTION_KINDS)[number], z.infer<typ
   create_subscription: 'confirm',
   cancel_subscription: 'confirm',
   accept_dispute: 'never',
+  offer_payment_plan: 'confirm',
 };
+
+/** A conditional policy: the first rule whose kind and amount range match decides the mode. */
+export const ApprovalRule = z.object({
+  kind: z.enum(ACTION_KINDS),
+  mode: PolicyModeSchema,
+  /** Applies when the action's amount is at most this. */
+  maxAmount: z.number().nonnegative().optional(),
+  /** Applies when the action's amount is at least this. */
+  minAmount: z.number().nonnegative().optional(),
+  note: z.string().optional(),
+});
+
+/** Caps on what may run automatically per calendar day (in the business time zone). Over the cap, "auto" becomes "confirm". */
+export const ActionLimit = z.object({
+  kind: z.enum(ACTION_KINDS),
+  perDay: z.number().int().positive().optional(),
+  amountPerDay: z.number().positive().optional(),
+});
+
+/** Customer-facing actions are held until business hours instead of going out at night. */
+export const QuietHours = z.object({
+  start: z.string().regex(/^\d{2}:\d{2}$/),
+  end: z.string().regex(/^\d{2}:\d{2}$/),
+  timezone: z.string().default('UTC'),
+  weekends: z.boolean().default(true),
+  kinds: z.array(z.enum(ACTION_KINDS)).default(['send_reminder', 'offer_payment_plan']),
+});
+
+export const CollectionStep = z.object({
+  afterDaysOverdue: z.number().int().min(0),
+  tone: z.enum(['friendly', 'firm', 'final']),
+});
+
+export const CollectionsPlaybook = z.object({
+  steps: z.array(CollectionStep).default([
+    { afterDaysOverdue: 3, tone: 'friendly' },
+    { afterDaysOverdue: 14, tone: 'firm' },
+    { afterDaysOverdue: 30, tone: 'final' },
+  ]),
+  /** Never remind the same invoice more often than this. */
+  minDaysBetween: z.number().int().min(1).default(5),
+  /** Notes containing these mean the customer promised to pay: hold reminders. */
+  promiseKeywords: z.array(z.string()).default(['promise', 'promised', 'will pay', 'paying on', 'pay by']),
+  /** Notes containing these mean the customer asked to pay in parts: offer a payment plan instead. */
+  planKeywords: z.array(z.string()).default(['split', 'instal', 'payment plan', 'in parts', 'installment']),
+  /** Hold reminders for this many days after a promise note (counted from the invoice due date). */
+  promiseGraceDays: z.number().int().min(0).default(10),
+});
 
 export const RetrofitMapping = z.object({
   version: z.literal(1),
@@ -106,6 +155,10 @@ export const RetrofitMapping = z.object({
     subscription: SubscriptionMapping.optional(),
   }),
   policies: z.record(z.enum(ACTION_KINDS), PolicyModeSchema).default({}),
+  rules: z.array(ApprovalRule).default([]),
+  limits: z.array(ActionLimit).default([]),
+  quietHours: QuietHours.optional(),
+  collections: CollectionsPlaybook.default({}),
   /** Why each part of the mapping was chosen. Keys are dotted paths such as "invoice.fields.total". */
   rationale: z.record(z.string(), z.string()).default({}),
   confidence: z.record(z.string(), z.number().min(0).max(1)).default({}),
@@ -113,6 +166,39 @@ export const RetrofitMapping = z.object({
 });
 
 export type RetrofitMapping = z.infer<typeof RetrofitMapping>;
+export type ApprovalRule = z.infer<typeof ApprovalRule>;
+export type ActionLimit = z.infer<typeof ActionLimit>;
+export type QuietHours = z.infer<typeof QuietHours>;
+export type CollectionsPlaybook = z.infer<typeof CollectionsPlaybook>;
+
+/**
+ * Controls retrofit recommends for a new mapping: small refunds run on their own, big ones and daily
+ * totals need a person, and reminders are not sent at night or at weekends.
+ */
+export function recommendedControls(timezone = 'UTC') {
+  return {
+    rules: [
+      { kind: 'create_refund', mode: 'auto', maxAmount: 100, note: 'Small refunds run automatically' },
+      {
+        kind: 'record_payment',
+        mode: 'auto',
+        maxAmount: 250,
+        note: 'Small payments received outside PayPal are recorded automatically',
+      },
+    ] satisfies ApprovalRule[],
+    limits: [
+      { kind: 'create_refund', amountPerDay: 500 },
+      { kind: 'send_reminder', perDay: 40 },
+    ] satisfies ActionLimit[],
+    quietHours: {
+      start: '20:00',
+      end: '08:00',
+      timezone,
+      weekends: true,
+      kinds: ['send_reminder', 'offer_payment_plan'],
+    } satisfies QuietHours,
+  };
+}
 export type InvoiceMapping = z.infer<typeof InvoiceMapping>;
 export type CustomerMapping = z.infer<typeof CustomerMapping>;
 export type SubscriptionMapping = z.infer<typeof SubscriptionMapping>;

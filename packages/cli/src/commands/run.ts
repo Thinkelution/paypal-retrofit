@@ -1,6 +1,15 @@
 import * as p from '@clack/prompts';
-import { claudeConfigured, OpsAgent } from '@paypal-retrofit/agents';
+import { claudeConfigured, draftReminders, OpsAgent } from '@paypal-retrofit/agents';
 import {
+  cashForecast,
+  invoiceRisks,
+  journal,
+  journalCsv,
+  monthRange,
+  monthSummary,
+  planCollections,
+  runCollections,
+  type CollectionItem,
   hasErrors,
   loadConfig,
   reconcile,
@@ -11,6 +20,7 @@ import {
   type ResolvedConfig,
 } from '@paypal-retrofit/core';
 import { createServer } from '@paypal-retrofit/server';
+import fs from 'node:fs';
 import readline from 'node:readline/promises';
 import { c, issuesSummary, planSummary, resultSummary, table } from '../ui.ts';
 
@@ -80,11 +90,22 @@ export async function runReconcile(opts: { config?: string }) {
   }
 }
 
-export async function actions(opts: { config?: string; approve?: string; reject?: string; all?: boolean }) {
+export async function actions(opts: {
+  config?: string;
+  approve?: string;
+  reject?: string;
+  runNow?: string;
+  all?: boolean;
+}) {
   const rf = open(opts.config);
   try {
     if (opts.approve) {
       const a = await rf.approve(Number(opts.approve));
+      console.log(`Action ${a.id} ${a.status}`, a.result ? JSON.stringify(a.result) : '');
+      return;
+    }
+    if (opts.runNow) {
+      const a = await rf.approve(Number(opts.runNow), { force: true });
       console.log(`Action ${a.id} ${a.status}`, a.result ? JSON.stringify(a.result) : '');
       return;
     }
@@ -241,4 +262,123 @@ export async function doctor(opts: { config?: string }) {
     await rf.close();
   }
   if (failures) process.exitCode = 1;
+}
+
+export async function collections(opts: { config?: string; run?: boolean; ai?: boolean; yes?: boolean }) {
+  const rf = open(opts.config);
+  try {
+    const items = await planCollections(rf);
+    console.log(c.bold(`\nCollections plan (${items.length} open PayPal invoices)`));
+    console.log(
+      table(
+        items.map((i) => ({
+          invoice: i.number,
+          customer: i.customer,
+          due: `${i.amountDue.toFixed(2)}`,
+          overdue: i.daysOverdue ? `${i.daysOverdue}d` : '',
+          decision:
+            i.decision === 'remind'
+              ? c.yellow(i.decision)
+              : i.decision === 'escalate'
+                ? c.red(i.decision)
+                : i.decision,
+          tone: i.tone ?? '',
+          why: i.reason,
+        })),
+        ['invoice', 'customer', 'due', 'overdue', 'decision', 'tone', 'why'],
+      ),
+    );
+    if (!opts.run) {
+      console.log(
+        c.dim('\nRun with --run to queue these reminders and payment-plan offers (policies still apply).'),
+      );
+      return;
+    }
+    const writer =
+      opts.ai !== false && claudeConfigured() ? (xs: CollectionItem[]) => draftReminders(rf, xs) : undefined;
+    const run = await runCollections(rf, { origin: 'cli', writer });
+    console.log(
+      c.bold(
+        `\nQueued ${run.proposed.length} action(s) (${run.writer === 'ai' ? 'reminders written by Claude' : 'template reminders'})`,
+      ),
+    );
+    console.log(
+      table(
+        run.proposed.map((p) => ({
+          invoice: p.item.number,
+          action: p.action.kind,
+          status: p.action.status,
+          why: p.action.policyReason ?? '',
+        })),
+        ['invoice', 'action', 'status', 'why'],
+      ),
+    );
+  } finally {
+    await rf.close();
+  }
+}
+
+export async function forecast(opts: { config?: string }) {
+  const rf = open(opts.config);
+  try {
+    const f = await cashForecast(rf);
+    const max = Math.max(1, ...f.weeks.map((w) => w.expected));
+    console.log(c.bold(`\nExpected cash, next ${f.weeks.length} weeks (${f.currency})`));
+    for (const w of f.weeks) {
+      const bar = '█'.repeat(Math.round((w.expected / max) * 32));
+      console.log(`  ${w.start}  ${bar.padEnd(32)} ${w.expected.toFixed(2).padStart(10)}`);
+    }
+    console.log(
+      `\n  Next 30 days ${c.bold(f.next30.toFixed(2))}   next 60 days ${c.bold(f.next60.toFixed(2))}   at high risk ${c.red(f.atRisk.toFixed(2))}`,
+    );
+    const risks = (await invoiceRisks(rf)).slice(0, 8);
+    console.log(c.bold('\nHighest late-payment risk'));
+    console.log(
+      table(
+        risks.map((r) => ({
+          invoice: r.number,
+          customer: r.customer,
+          due: r.amountDue.toFixed(2),
+          risk: `${r.band} ${r.score}`,
+          expected: r.expectedPayDate,
+          why: r.factors.join('; '),
+        })),
+      ),
+    );
+    console.log(c.dim(`\n${f.assumptions.join('\n')}`));
+  } finally {
+    await rf.close();
+  }
+}
+
+export async function exportJournal(opts: {
+  config?: string;
+  month?: string;
+  from?: string;
+  to?: string;
+  format?: string;
+  out?: string;
+}) {
+  const rf = open(opts.config);
+  try {
+    const month = opts.month;
+    const range = month ? monthRange(month) : { from: opts.from, to: opts.to };
+    const fmt = (['generic', 'xero', 'quickbooks'].includes(opts.format ?? '') ? opts.format : 'generic') as
+      'generic' | 'xero' | 'quickbooks';
+    const csv = journalCsv(await journal(rf, range.from, range.to), fmt);
+    if (opts.out) {
+      fs.writeFileSync(opts.out, csv);
+      console.log(`Wrote ${opts.out}`);
+    } else process.stdout.write(csv);
+    if (month) {
+      const s = await monthSummary(rf, month);
+      console.error(
+        c.dim(
+          `${month}: gross ${s.grossCollected} ${s.currency}, fees ${s.fees}, net ${s.net}, refunds ${s.refunds}${s.feesMissing ? ` (${s.feesMissing} fee(s) not known yet; run reconcile)` : ''}`,
+        ),
+      );
+    }
+  } finally {
+    await rf.close();
+  }
 }

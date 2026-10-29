@@ -79,3 +79,26 @@ export class Logger {
 }
 
 export const log = new Logger('retrofit');
+
+export function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** Adds days to a YYYY-MM-DD date. */
+export function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Whole days from a to b (YYYY-MM-DD or ISO). */
+export function daysBetween(a: string, b: string): number {
+  return Math.round((Date.parse(b.slice(0, 10)) - Date.parse(a.slice(0, 10))) / 86400000);
+}
+
+export function median(xs: number[]): number | null {
+  if (xs.length === 0) return null;
+  const s = [...xs].sort((x, y) => x - y);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+}

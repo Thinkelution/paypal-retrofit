@@ -9,7 +9,10 @@
 | `core/paypal` | Thin typed REST client (OAuth client credentials, cached token, `PayPal-Request-Id` idempotency, `Prefer: return=representation`), payload builders for invoices, products, plans and subscriptions. |
 | `core/engine` | `Retrofit`: planning, the action/policy gate, execution, write-back, state application. |
 | `core/webhooks` | Signature verification, idempotent event storage, event routing. |
-| `core/reconcile` | Full comparison of linked records with PayPal; auto-repair of missed payments; discrepancy lifecycle. |
+| `core/reconcile` | Full comparison of linked records with PayPal; auto-repair of missed payments; fee back-fill from Transaction Search; discrepancy lifecycle. |
+| `core/policy` | Decides each action's mode: amount rules, per-kind policy, defaults, daily limits, quiet hours (time-zone and DST aware). Returns a human-readable reason. |
+| `core/collections` | The collections playbook: remind / wait / hold / plan / escalate per open invoice, tone-appropriate templates, and `runCollections` which proposes the actions. |
+| `core/insights` | Customer payment profiles, late-payment risk with factors, expected pay dates, the 9-week cash forecast, the payments journal, month-end summary and CSV / Xero / QuickBooks exports. |
 | `core/ledger` | Joined legacy ↔ PayPal view and totals used by the console and the agents. |
 | `core/state` | SQLite state store: `links`, `events`, `actions`, `discrepancies`, `meta`. |
 | `agents` | Mapper (structured outputs), Ops (SDK tool runner), Support (structured outputs); tools for the engine and the PayPal Agent Toolkit bridge. |
@@ -24,6 +27,14 @@
 3. **payment**: buyer pays → PayPal sends `PAYMENT.CAPTURE.COMPLETED` / `INVOICING.INVOICE.PAID` → verify signature → store event once → re-read the invoice from PayPal (never trust the payload alone) → write `status`, `paid_at`, `paid_amount` to the legacy row → 200.
 4. **reconcile** (every 5 minutes in `serve`, on demand): re-read every linked invoice, apply its state (repairs missed webhooks), and open/close discrepancies.
 
+## Payment plans
+
+`offer_payment_plan` keeps the PayPal invoice as one invoice and turns on `configuration.partial_payment` with a minimum of one instalment, appending the schedule to the invoice note (customer notified). The schedule lives in the `plans` table. `PARTIALLY_PAID` updates write the running total back and report "instalment k of n"; `PAID` completes the plan. Collections reminds per instalment, and the forecast places instalments on their dates.
+
+## Payments ledger
+
+Every payment, refund and payment recorded outside PayPal is mirrored into the `payments` table from the invoice's `payments` and `refunds` transactions, keyed by the PayPal payment id. Fees come from `PAYMENT.CAPTURE.COMPLETED` (`seller_receivable_breakdown.paypal_fee`) and, if missing, from Transaction Search during reconciliation.
+
 ## Actions and policies
 
 Every side effect is an `ActionRecord` with an origin (`sync`, `agent`, `dashboard`, `cli`, `reconcile`), a target, a payload, a human-readable reason and the policy that applied.
@@ -33,6 +44,14 @@ Every side effect is an `ActionRecord` with an origin (`sync`, `agent`, `dashboa
 | `auto` | Executes immediately. Defaults: create, send and update invoices. |
 | `confirm` | Stored as `pending` until approved in the console, CLI or chat. Defaults: reminders, cancellations, recorded payments, refunds, subscriptions. |
 | `never` | Recorded as rejected. Default: accepting disputes. |
+
+On top of the per-kind policy:
+
+- **Rules** (`rules` in the mapping) pick a mode by amount, for example refunds up to 100 run automatically. The first matching rule wins.
+- **Limits** (`limits`) cap what runs automatically per day in the business time zone, by count or amount; over the cap, "auto" becomes "confirm".
+- **Quiet hours** (`quietHours`) hold customer-facing kinds (reminders, payment-plan offers) until business hours: the action becomes `scheduled` with `run_after`, and the server runs due actions every minute. `approve --force` (Send now) skips the hold.
+
+Each action stores its `amount` and a `policy_reason` such as "Daily limit: 480.00 of 500.00 USD in refunds already ran today; this 40.00 needs approval".
 
 Pending actions are de-duplicated per kind and target. Approvals re-read the legacy record, so they act on current data.
 
@@ -52,9 +71,12 @@ The Ops agent has read tools (ledger, read-only SQL, PayPal Agent Toolkit reads)
 links(entity, legacy_pk, paypal_id, paypal_kind, pay_link, paypal_status, paypal_amount, paypal_paid,
       paypal_paid_at, paypal_transaction_id, source_hash, created_at, last_synced_at)
 events(id, type, received_at, processed_at, status, summary, error, payload)
-actions(id, origin, kind, target, payload, reason, policy, status, created_at, decided_at, result, dedupe_key)
+actions(id, origin, kind, target, payload, reason, policy, status, created_at, decided_at, result, dedupe_key,
+        policy_reason, amount, run_after)
 discrepancies(id, entity, legacy_pk, paypal_id, kind, detail, suggestion, detected_at, resolved_at, resolution)
 meta(key, value)
+plans(legacy_pk, paypal_id, installments, installment_amount, total, schedule, status, created_at, updated_at)
+payments(id, entity, legacy_pk, paypal_id, kind, gross, fee, net, currency, method, occurred_at, recorded_at)
 ```
 
 ## Security notes
