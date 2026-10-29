@@ -32,14 +32,13 @@ export function Discrepancies(props: {
         ),
       },
       { headerName: 'Record', width: 130, valueGetter: (p) => (p.data ? label(p.data) : '') },
-      { field: 'detail', flex: 1, minWidth: 280, wrapText: true, autoHeight: true },
+      { field: 'detail', flex: 1, minWidth: 280, wrapText: true },
       {
         field: 'suggestion',
         headerName: 'Suggested fix',
         flex: 1,
         minWidth: 220,
         wrapText: true,
-        autoHeight: true,
       },
       { field: 'detectedAt', headerName: 'Found', width: 100, valueFormatter: (p) => ago(p.value) },
       {
@@ -99,6 +98,8 @@ export function Discrepancies(props: {
       </div>
       <div className={`grid-wrap short ${dark ? 'ag-theme-quartz-dark' : 'ag-theme-quartz'}`}>
         <AgGridReact<Discrepancy>
+          rowHeight={60}
+          suppressAnimationFrame
           rowData={data ?? []}
           columnDefs={cols}
           defaultColDef={{ sortable: true, resizable: true, filter: true }}

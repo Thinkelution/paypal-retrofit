@@ -206,7 +206,6 @@ export function Mapping({ dark, toast }: { dark: boolean; toast: (m: string) => 
         flex: 1,
         minWidth: 220,
         wrapText: true,
-        autoHeight: true,
         cellClass: 'muted',
       },
     ],
@@ -337,6 +336,8 @@ export function Mapping({ dark, toast }: { dark: boolean; toast: (m: string) => 
         )}
         <div className={theme} style={{ height: 460 }}>
           <AgGridReact<FieldRow>
+            rowHeight={46}
+            suppressAnimationFrame
             rowData={fields}
             columnDefs={fieldCols}
             getRowId={(p) => p.data.id}

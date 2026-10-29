@@ -11,12 +11,26 @@ import { Ledger } from './pages/Ledger';
 import { Mapping } from './pages/Mapping';
 
 type Tab = 'ledger' | 'approvals' | 'discrepancies' | 'mapping' | 'activity';
+const TABS: Tab[] = ['ledger', 'approvals', 'discrepancies', 'mapping', 'activity'];
+const tabFromHash = (): Tab => {
+  const h = window.location.hash.slice(1) as Tab;
+  return TABS.includes(h) ? h : 'ledger';
+};
 
 export function App() {
   const dark = useDark();
   const [config, setConfig] = useState<Config | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('ledger');
+  const [tab, setTabState] = useState<Tab>(tabFromHash);
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    window.history.replaceState(null, '', t === 'ledger' ? window.location.pathname : `#${t}`);
+  };
+  useEffect(() => {
+    const on = () => setTabState(tabFromHash());
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
   const [selected, setSelected] = useState<LedgerRow | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
   const [agentQ, setAgentQ] = useState<string | null>(null);

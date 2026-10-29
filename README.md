@@ -2,7 +2,7 @@
 
 **Give any existing business a PayPal brain.** paypal-retrofit is an open-source SDK, CLI and console that lets an AI agent wire PayPal into a business system that already exists: its own database, its own invoice numbers, its own customers. Then it keeps both sides reconciled, with an agent that never moves money without a rule the owner set.
 
-> Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/) (October–November 2026). MIT licensed.
+> Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/) (October–November 2026). MIT licensed. Website: <https://thinkelution.github.io/paypal-retrofit/>
 
 ## The problem
 
@@ -16,7 +16,7 @@ PayPal's Agent Toolkit and MCP server let an AI agent *call* PayPal. Nothing let
 - **Sends invoices and subscriptions through PayPal, and writes the results back.** `sync` creates PayPal invoices with your own invoice numbers, emails customers a pay link, and writes the PayPal id and link into the columns you allowed. Payments arrive by verified webhook and flip your legacy record to paid with the amount and date. A reconciler repairs anything a lost webhook missed.
 - **Runs your receivables with an agent you control.** The Ops agent answers “who owes us the most?” or “why is INV-1042 still unpaid?” from your database and PayPal, and lines up reminders, recorded payments or refunds. Every side effect goes through a policy you set: `auto`, `confirm` (waits for your approval) or `never`.
 
-![Retrofit console](docs/images/console.jpg)
+![Retrofit console](site/assets/console.png)
 
 ## Try it in two minutes (no accounts needed)
 
@@ -133,6 +133,7 @@ packages/server       Express API, webhook endpoint, SSE live updates
 packages/dashboard    React + AG Grid console
 packages/cli          paypal-retrofit CLI
 packages/mock-paypal  local PayPal stand-in for tests and offline demos
+site/                 landing page, deployed to GitHub Pages by .github/workflows/pages.yml
 examples/legacy-invoicer  Fernhill Studio, the legacy app
 ```
 

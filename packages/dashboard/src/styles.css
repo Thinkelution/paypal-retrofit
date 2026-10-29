@@ -743,3 +743,13 @@ dl.kv dd {
     display: none;
   }
 }
+
+.ag-cell-wrap-text {
+  line-height: 1.35;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}

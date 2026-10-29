@@ -37,7 +37,7 @@ export function Approvals({ dark, toast }: { dark: boolean; toast: (m: string) =
         width: 170,
         valueGetter: (p) => p.data?.target.label ?? p.data?.target.legacyPk,
       },
-      { field: 'reason', flex: 1, minWidth: 260, tooltipField: 'reason', wrapText: true, autoHeight: true },
+      { field: 'reason', flex: 1, minWidth: 260, tooltipField: 'reason', wrapText: true },
       {
         field: 'origin',
         headerName: 'Asked by',
@@ -96,6 +96,8 @@ export function Approvals({ dark, toast }: { dark: boolean; toast: (m: string) =
       </div>
       <div className={`grid-wrap short ${dark ? 'ag-theme-quartz-dark' : 'ag-theme-quartz'}`}>
         <AgGridReact<Action>
+          rowHeight={60}
+          suppressAnimationFrame
           rowData={data ?? []}
           columnDefs={cols}
           defaultColDef={{ sortable: true, resizable: true, filter: true }}

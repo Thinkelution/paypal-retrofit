@@ -30,7 +30,6 @@ export function Activity({ dark }: { dark: boolean }) {
         flex: 1,
         minWidth: 280,
         wrapText: true,
-        autoHeight: true,
       },
       { field: 'error', width: 200, hide: !(data ?? []).some((e) => e.error) },
       { field: 'id', headerName: 'Event id', width: 220, cellClass: 'mono' },
@@ -48,6 +47,8 @@ export function Activity({ dark }: { dark: boolean }) {
       </div>
       <div className={`grid-wrap short ${dark ? 'ag-theme-quartz-dark' : 'ag-theme-quartz'}`}>
         <AgGridReact<EventRec>
+          rowHeight={60}
+          suppressAnimationFrame
           rowData={data ?? []}
           columnDefs={cols}
           defaultColDef={{ sortable: true, resizable: true, filter: true }}
