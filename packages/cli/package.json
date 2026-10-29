@@ -1,0 +1,26 @@
+{
+  "name": "paypal-retrofit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Retrofit PayPal into an existing business database with an AI agent.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "paypal-retrofit": "./bin/paypal-retrofit.js"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.8.2",
+    "@paypal-retrofit/agents": "workspace:*",
+    "@paypal-retrofit/core": "workspace:*",
+    "@paypal-retrofit/server": "workspace:*",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "picocolors": "^1.1.1",
+    "tsx": "^4.19.2",
+    "@paypal-retrofit/mock-paypal": "workspace:*",
+    "fernhill-legacy-invoicer": "workspace:*"
+  }
+}

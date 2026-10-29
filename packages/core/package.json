@@ -1,0 +1,23 @@
+{
+  "name": "@paypal-retrofit/core",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.5.0",
+    "csv-parse": "^5.5.6",
+    "csv-stringify": "^6.5.1",
+    "pg": "^8.13.1",
+    "yaml": "^2.6.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@paypal-retrofit/mock-paypal": "workspace:*",
+    "express": "^4.21.1",
+    "fernhill-legacy-invoicer": "workspace:*"
+  }
+}

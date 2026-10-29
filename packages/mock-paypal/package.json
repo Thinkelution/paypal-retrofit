@@ -1,0 +1,17 @@
+{
+  "name": "@paypal-retrofit/mock-paypal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A small in-memory stand-in for the PayPal REST endpoints paypal-retrofit uses. For tests and offline demos only.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "express": "^4.21.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21"
+  }
+}

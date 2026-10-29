@@ -1,0 +1,42 @@
+# Render Blueprint: deploys the Fernhill demo (console + legacy app + mock PayPal) as one web service.
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: paypal-retrofit-demo
+    runtime: node
+    plan: free
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm retrofit demo --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RETROFIT_DASHBOARD_PASSWORD
+        sync: false
+      - key: RETROFIT_MODEL
+        value: claude-opus-5-5
+
+  # Optional: the same demo against the real PayPal sandbox.
+  # Uncomment, then set the PayPal secrets in the Render dashboard.
+  # - type: web
+  #   name: paypal-retrofit-sandbox
+  #   runtime: node
+  #   plan: free
+  #   buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+  #   startCommand: pnpm retrofit demo --sandbox --port $PORT
+  #   healthCheckPath: /healthz
+  #   envVars:
+  #     - key: NODE_VERSION
+  #       value: "22"
+  #     - key: PAYPAL_CLIENT_ID
+  #       sync: false
+  #     - key: PAYPAL_CLIENT_SECRET
+  #       sync: false
+  #     - key: FERNHILL_BUYER_EMAIL
+  #       sync: false
+  #     - key: ANTHROPIC_API_KEY
+  #       sync: false
+  #     - key: RETROFIT_DASHBOARD_PASSWORD
+  #       sync: false

@@ -1,0 +1,14 @@
+# Demo video script (target 2:40, hard limit under 3:00)
+
+Record at 1080p. Terminal font at least 16 pt. Browser zoom 110%. No music, or royalty-free only. No logos besides what the PayPal sandbox pages show as part of the flow. Use the real PayPal sandbox for the payment segment if credentials are available (`pnpm retrofit demo --sandbox`); otherwise the mock, and say so on screen.
+
+| Time | Screen | Voice-over |
+| --- | --- | --- |
+| 0:00–0:20 | Fernhill legacy app: invoice list, 17 red “overdue” rows, the “Mark as paid” button | “Fernhill Studio runs on a 2016 invoicing app. Seventeen invoices are overdue, worth twelve thousand dollars, and every payment is marked by hand. Adding PayPal normally means a developer and a week of glue code.” |
+| 0:20–0:50 | Terminal: `pnpm retrofit init --source sqlite:./fernhill.db`. Schema table, spinner “Claude is mapping…”, mapping table with reasons, confirm | “paypal-retrofit points an agent at the database it already has. Claude reads the schema, works out which table is customers, which is invoices, what ‘overdue’ and ‘void’ mean, and where it may write PayPal ids back. Every choice comes with a reason, and nothing touches PayPal until I say yes.” |
+| 0:50–1:15 | Console hero → **Send 22 invoices through PayPal** → toast → ledger shows *Sent*; legacy app shows PayPal ids | “One click sends the twenty-two open invoices through PayPal with Fernhill's own invoice numbers. The pay links are written straight back into the old app.” |
+| 1:15–1:45 | Open INV-1012 → **Pay as customer** → sandbox login → pay → back to console: row *Paid*, KPI *Collected* rises, Webhooks tab shows two verified events; refresh legacy app: `paid` | “A customer pays. PayPal's webhook is signature-checked, stored once, and the legacy invoice flips to paid with the amount and date. If a webhook is ever lost, the reconciler catches it.” |
+| 1:45–2:20 | Agent panel: “Send reminders for everything more than 14 days overdue” → tool trace → proposals → Approvals → **Approve all** | “The Ops agent works the receivables. It reads the ledger and PayPal through PayPal's Agent Toolkit, finds the fourteen invoices, and lines up a reminder for each. Reminders are set to ‘confirm’, so nothing goes out until I approve.” |
+| 2:20–2:40 | Mapping page (policies grid), then end card: repo URL, “MIT · SQLite · Postgres · CSV · PayPal Agent Toolkit · Claude” | “paypal-retrofit is open source. Point it at SQLite, Postgres or a folder of CSV exports, and any existing business gets PayPal invoicing, subscriptions and an agent that reconciles it all, under rules the owner sets.” |
+
+Backup takes: the mock flow (same steps, no sandbox login) and a reconcile-after-lost-webhook take.

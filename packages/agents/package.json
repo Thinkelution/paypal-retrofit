@@ -1,0 +1,19 @@
+{
+  "name": "@paypal-retrofit/agents",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest",
+    "@paypal-retrofit/core": "workspace:*",
+    "@paypal/agent-toolkit": "latest",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "express": "^4.21.1"
+  }
+}
