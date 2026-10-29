@@ -41,6 +41,7 @@ Anthropic Claude (`claude-opus-5-5`) via the official `@anthropic-ai/sdk`: (1) t
 
 ## Links
 
-- Repository: TODO
+- Repository: https://github.com/Thinkelution/paypal-retrofit
+- Website: https://thinkelution.github.io/paypal-retrofit/
 - Hosted demo: TODO
 - Video: TODO

@@ -26,7 +26,7 @@ Read this whole document before writing code. Sections 1 and 2 are non-negotiabl
 
 1. Live PayPal sandbox: no credentials were available. Create the sandbox app (section 8), then run `pnpm smoke:sandbox` and `pnpm retrofit demo --sandbox` with a public HTTPS URL. Fix any request-body differences PayPal reports.
 2. Live Claude calls: no `ANTHROPIC_API_KEY` was available. The agent loop is tested against a fake Messages API; run `init` and the agent panel with a real key and tune prompts.
-3. Public GitHub repo, Render deploy, `PAYPAL_WEBHOOK_ID`, JUDGES.md credentials, demo video, Devpost form (the TODO markers in JUDGES.md and docs/devpost.md).
+3. Render deploy, `PAYPAL_WEBHOOK_ID`, JUDGES.md credentials, demo video, Devpost form (the TODO markers in JUDGES.md and docs/devpost.md). Done: public repo https://github.com/Thinkelution/paypal-retrofit (MIT detected) and landing page https://thinkelution.github.io/paypal-retrofit/ (GitHub Pages, deployed by .github/workflows/pages.yml).
 4. APIMatic Context Plugin: not used yet; only claim it if it is used.
 5. Stretch `expose` (MCP server for buyer agents) not started.
 
