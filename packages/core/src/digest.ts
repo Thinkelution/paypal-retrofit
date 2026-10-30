@@ -71,6 +71,14 @@ export interface DigestData {
     factors: string[];
   }>;
   attention: Array<{ kind: string; label: string; detail: string; suggestion: string | null }>;
+  /** What customers asked for in the portal (still open). */
+  requests: Array<{ customer: string; number: string; kind: string; detail: string }>;
+  /** Shop and buyer-agent sales completed since the last digest. */
+  sales: {
+    count: number;
+    total: number;
+    items: Array<{ id: string; channel: string; total: number; buyer: string }>;
+  };
 }
 
 export const KIND_LABEL: Record<string, string> = {
@@ -145,9 +153,13 @@ export async function buildDigest(
       items: payments
         .slice(-12)
         .reverse()
-        .map((p) => ({
-          number: label(p.legacyPk),
-          customer: who(p.legacyPk),
+        .map((p) => {
+          const order = p.entity === 'order' ? rf.state.getOrder(p.legacyPk) : undefined;
+          return { p, order };
+        })
+        .map(({ p, order }) => ({
+          number: order ? `Order ${order.id}` : label(p.legacyPk),
+          customer: order ? (order.buyer?.name ?? order.buyer?.email ?? '') : who(p.legacyPk),
           amount: p.gross,
           kind: p.kind,
           method: p.method,
@@ -204,6 +216,37 @@ export async function buildDigest(
         detail: d.detail,
         suggestion: d.suggestion,
       })),
+    requests: rf.state
+      .listRequests({ status: 'open' })
+      .slice(0, 8)
+      .map((r) => ({
+        customer: rows.find((x) => x.entity === 'invoice' && x.legacyPk === r.legacyPk)?.customer ?? '',
+        number: r.legacyPk ? label(r.legacyPk) : '',
+        kind: r.kind,
+        detail:
+          r.kind === 'promise'
+            ? `Promised to pay by ${r.until}`
+            : r.kind === 'plan'
+              ? `Asked to pay in ${r.installments ?? 2} parts`
+              : `Asked: “${(r.detail ?? '').slice(0, 140)}”`,
+      })),
+    sales: (() => {
+      const done = rf.state
+        .listOrders(500)
+        .filter((o) => o.status === 'COMPLETED' && !o.invoices?.length && o.updatedAt >= since);
+      return {
+        count: done.length,
+        total: round2(done.reduce((s, o) => s + o.total, 0)),
+        items: done.slice(0, 6).map((o) => ({
+          id: o.id,
+          channel: o.channel,
+          total: o.total,
+          buyer: o.buyer?.agent
+            ? `${o.buyer.name ?? o.buyer.email ?? 'a buyer'} via ${o.buyer.agent}`
+            : (o.buyer?.name ?? o.buyer?.email ?? ''),
+        })),
+      };
+    })(),
   };
   data.headline = digestHeadline(data);
   return data;
@@ -227,7 +270,7 @@ export function digestHeadline(d: DigestData): string {
       ? `${m(d.money.gross)} came in from ${plural(d.money.count, 'payment')}`
       : 'No new payments since the last digest',
   );
-  const decide = d.approvalsTotal + d.escalate.length + d.attention.length;
+  const decide = d.approvalsTotal + d.escalate.length + d.attention.length + d.requests.length;
   parts.push(
     decide ? `${plural(decide, 'thing')} need${decide === 1 ? 's' : ''} you` : 'nothing needs you today',
   );
@@ -261,6 +304,31 @@ export function verifyActionToken(
   if (!id || !exp) return { error: 'This link is not valid.' };
   if (exp * 1000 < now) return { error: 'This link has expired. Open the console to review the action.' };
   return { actionId: id };
+}
+
+/** Signed link to one customer's portal. Long-lived (statements and reminders carry it), still expiring. */
+export function signPortalToken(secret: string, customerPk: string, ttlDays = 120, now = Date.now()): string {
+  const body = `${b64(customerPk)}.${Math.floor(now / 1000) + ttlDays * 86400}`;
+  const sig = crypto.createHmac('sha256', secret).update(`portal:${body}`).digest();
+  return `${b64(body)}.${b64(sig.subarray(0, 18))}`;
+}
+
+export function verifyPortalToken(
+  secret: string,
+  token: string,
+  now = Date.now(),
+): { customerPk: string } | { error: string } {
+  const [bodyPart, sigPart] = token.split('.');
+  if (!bodyPart || !sigPart) return { error: 'This link is not valid.' };
+  const body = Buffer.from(bodyPart, 'base64url').toString();
+  const expected = crypto.createHmac('sha256', secret).update(`portal:${body}`).digest().subarray(0, 18);
+  const given = Buffer.from(sigPart, 'base64url');
+  if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected))
+    return { error: 'This link is not valid.' };
+  const [pk, exp] = body.split('.');
+  if (!pk || !Number(exp)) return { error: 'This link is not valid.' };
+  if (Number(exp) * 1000 < now) return { error: 'This link has expired. Ask for a new statement.' };
+  return { customerPk: Buffer.from(pk, 'base64url').toString() };
 }
 
 /** The secret behind approval links: RETROFIT_LINK_SECRET, or one generated once and kept in the state store. */
@@ -363,6 +431,17 @@ export function renderDigest(d: DigestData, opts: RenderOptions = {}): RenderedD
       t.push(`- ${r.number} · ${r.customer} · ${m(r.amountDue)} · ${r.band} risk · ${r.factors.join('; ')}`);
     t.push('');
   }
+  if (d.requests.length) {
+    t.push('Customers asked (portal):');
+    for (const r of d.requests) t.push(`- ${r.customer}${r.number ? ` · ${r.number}` : ''}: ${r.detail}`);
+    t.push('');
+  }
+  if (d.sales.count) {
+    t.push(`Sold online: ${m(d.sales.total)} in ${plural(d.sales.count, 'order')}`);
+    for (const s of d.sales.items)
+      t.push(`- ${s.id} · ${m(s.total)} · ${s.channel}${s.buyer ? ` · ${s.buyer}` : ''}`);
+    t.push('');
+  }
   if (d.attention.length) {
     t.push('Needs a look:');
     for (const a of d.attention)
@@ -455,6 +534,32 @@ export function renderDigest(d: DigestData, opts: RenderOptions = {}): RenderedD
         link('insights'),
       ),
     );
+  if (d.requests.length)
+    parts.push(
+      section(
+        'Customers asked in the portal',
+        rowsTable(
+          d.requests.map(
+            (r) =>
+              `<tr><td ${td}><div style="font-weight:600">${esc(r.customer)}${r.number ? ` · ${esc(r.number)}` : ''}</div><div style="color:${muted};font-size:13px;margin-top:2px">${esc(r.detail)}</div></td></tr>`,
+          ),
+        ),
+        link('customers'),
+      ),
+    );
+  if (d.sales.count)
+    parts.push(
+      section(
+        `Sold online · ${m(d.sales.total)}`,
+        rowsTable(
+          d.sales.items.map(
+            (s) =>
+              `<tr><td ${td}>${esc(s.id)}<div style="color:${muted};font-size:13px;margin-top:2px">${esc(s.channel === 'agent' ? 'Bought by an AI shopping agent' : 'Shop page')}${s.buyer ? ` · ${esc(s.buyer)}` : ''}</div></td><td ${td} align="right" style="padding:10px 0;border-top:1px solid ${line};font-size:14px;font-weight:600;color:${ink}">${esc(m(s.total))}</td></tr>`,
+          ),
+        ),
+        link('shop'),
+      ),
+    );
   if (d.attention.length)
     parts.push(
       section(
@@ -532,6 +637,22 @@ export function renderDigest(d: DigestData, opts: RenderOptions = {}): RenderedD
       text: {
         type: 'mrkdwn',
         text: `*Call these customers*\n${d.escalate.map((e) => `• ${e.customer} about ${e.number} (${m(e.amountDue)})`).join('\n')}`,
+      },
+    });
+  if (d.requests.length)
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*Customers asked (portal)*\n${d.requests.map((r) => `• ${r.customer}${r.number ? ` ${r.number}` : ''}: ${r.detail}`).join('\n')}`,
+      },
+    });
+  if (d.sales.count)
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*Sold online*\n${m(d.sales.total)} in ${plural(d.sales.count, 'order')}`,
       },
     });
   if (d.attention.length)

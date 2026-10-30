@@ -100,7 +100,9 @@
   .mark { width: 30px; height: 30px; border-radius: 8px; background: var(--accent); display: grid; place-items: center; flex: none; }
   .mark svg { width: 18px; height: 18px; }
   .nav nav { display: flex; gap: 20px; margin-left: auto; }
-  .nav nav a { color: var(--ink-2); text-decoration: none; font-size: 15px; font-weight: 500; }
+  .nav nav a { color: var(--ink-2); text-decoration: none; font-size: 15px; font-weight: 500; white-space: nowrap; }
+  .nav .logo { white-space: nowrap; }
+  @media (max-width: 1240px) { .nav nav { gap: 14px; } .nav nav a { font-size: 14px; } .nav nav a.minor { display: none; } }
   .nav nav a:hover { color: var(--ink); }
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 20px; border-radius: 10px; font-weight: 600; font-size: 15px; text-decoration: none; border: 1px solid var(--line); color: var(--ink); background: var(--surface); white-space: nowrap; cursor: pointer; }
   .btn:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
@@ -254,6 +256,9 @@
 
   /* use cases */
   .uc-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+  .uc-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 1100px) { .uc-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 640px) { .uc-grid.four { grid-template-columns: minmax(0, 1fr); } }
   .uc { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 22px; display: flex; flex-direction: column; gap: 10px; }
   .uc .quote { font-size: 15px; font-style: italic; color: var(--ink-2); border-left: 3px solid var(--accent); padding-left: 12px; margin: 0; }
   .uc h3 { font-size: 18px; }
@@ -329,9 +334,10 @@
       <a href="#how">How it works</a>
       <a href="#use-cases">Use cases</a>
       <a href="#beyond">Beyond the SDK</a>
-      <a href="#agents">Agents</a>
-      <a href="#safety">Safety</a>
-      <a href="#screens">Screens</a>
+      <a href="#around">Customers &amp; agents</a>
+      <a href="#agents" class="minor">Agents</a>
+      <a href="#safety" class="minor">Safety</a>
+      <a href="#screens" class="minor">Screens</a>
       <a href="#start">Quick start</a>
     </nav>
     <a class="btn sm" href="https://github.com/Thinkelution/paypal-retrofit">
@@ -357,6 +363,7 @@
         <span>SQLite, Postgres or CSV</span>
         <span>Collections, payment plans and cash forecast built in</span>
         <span>No-code setup, morning digest and an MCP server</span>
+        <span>Customer portal, agent checkout, multi-client</span>
         <span>Runs offline with a bundled PayPal mock</span>
         <span>PayPal sandbox ready</span>
       </div>
@@ -367,7 +374,7 @@
       <div class="stats">
         <div class="stat"><b>1 command</b><span>to map an existing schema to PayPal objects</span></div>
         <div class="stat"><b>0 changes</b><span>to the business's tables; write-back only to columns it allows</span></div>
-        <div class="stat"><b>15 events</b><span>of PayPal webhooks verified and applied</span></div>
+        <div class="stat"><b>17 events</b><span>of PayPal webhooks verified and applied</span></div>
         <div class="stat"><b>6 playbooks</b><span>for collections, plans, refunds, quiet hours, cash forecast and month-end</span></div>
       </div>
     </div>
@@ -677,7 +684,75 @@
     </div>
   </section>
 
-  <section id="agents">
+  <section id="around">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Around the business</span>
+        <h2 style="margin-top:14px">For customers, buyers' agents and bookkeepers too.</h2>
+        <p>Getting paid involves more people than the owner. Customers want one place to see and pay what they owe. New buyers increasingly arrive through an AI assistant. And many small businesses have a bookkeeper who looks after twenty of them.</p>
+      </div>
+      <div class="uc-grid four">
+        <article class="uc">
+          <p class="quote">“Can I just pay all three at once?”</p>
+          <h3>Customer portal</h3>
+          <p>A private link per customer: every open invoice, one PayPal checkout for any selection, a statement to download.</p>
+          <ul>
+            <li>“I'll pay by the 20th” holds reminders until then</li>
+            <li>“Can I split it?” queues a plan offer for the owner</li>
+            <li>Questions pause chasing until they are answered</li>
+          </ul>
+          <div class="uses"><span>Orders API</span><span>Statements</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“Book me a portrait session with Fernhill.”</p>
+          <h3>Agentic commerce</h3>
+          <p>A shop page, a catalogue feed and a buyer-facing MCP server built from the business's own product table.</p>
+          <ul>
+            <li><code>search_catalog</code>, <code>create_checkout</code> for shopping agents</li>
+            <li>Prices from the business, orders capped by the owner</li>
+            <li>A person always approves the payment at PayPal</li>
+          </ul>
+          <div class="uses"><span>Orders API</span><span>MCP</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“2% off within 10 days. 2% on after 30.”</p>
+          <h3>Late fees and discounts</h3>
+          <p>Payment terms as owner rules, applied to the PayPal invoice and explained to the customer.</p>
+          <ul>
+            <li>The discount comes off by itself when the window closes</li>
+            <li>No fee for anyone on a plan, disputing or who promised a date</li>
+            <li>Reconciliation knows the difference is expected</li>
+          </ul>
+          <div class="uses"><span>Invoice discounts</span><span>Policy engine</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“Which of my clients need me today?”</p>
+          <h3>Bookkeeper mode</h3>
+          <p>Every client business on one overview, sorted by approvals, customer requests and mismatches.</p>
+          <ul>
+            <li><code>paypal-retrofit practice --dir clients</code></li>
+            <li>Each client keeps its own data, PayPal, rules and digest</li>
+            <li><b>Add a client</b> runs the setup wizard</li>
+          </ul>
+          <div class="uses"><span>Multi-client</span><span>One process</span></div>
+        </article>
+      </div>
+      <div class="showcase">
+        <figure><button type="button" data-full="assets/portal.png"><img src="assets/portal.png" width="900" height="900" alt="A customer's portal page: open balance and overdue totals, two open invoices with checkboxes, tags for a question sent and a promised date, an early-payment discount, and a Pay selected with PayPal button." loading="lazy"></button><figcaption><b>Customer portal</b>Rockridge Florist sees both bills, has promised a date and asked a question, and can pay both in one checkout.</figcaption></figure>
+        <figure><button type="button" data-full="assets/shop.png"><img src="assets/shop.png" width="1440" height="1000" alt="Shop tab: online sales and sales by AI agents, the catalogue of services with prices, where buyers find the shop including the buyer MCP endpoint, and an order placed by Claude for a buyer." loading="lazy"></button><figcaption><b>Shop and buyer agents</b>Fernhill's catalogue, an order Claude placed for a buyer, and the MCP endpoint shopping agents use.</figcaption></figure>
+        <figure><button type="button" data-full="assets/customers.png"><img src="assets/customers.png" width="1440" height="1000" alt="Customers tab: requests from the portal, the payment terms form with late fee and early-payment discount, and a grid of customers with balances, overdue amounts and statement and portal buttons." loading="lazy"></button><figcaption><b>Customers and terms</b>What customers asked for, the owner's late-fee and discount rules, and statements for everyone with a balance.</figcaption></figure>
+        <figure><button type="button" data-full="assets/practice.png"><img src="assets/practice.png" width="1440" height="760" alt="All clients overview: totals across clients and a grid of client businesses with approvals waiting, customer requests, amounts owed and overdue." loading="lazy"></button><figcaption><b>All clients</b>The bookkeeper's morning: Brightside needs attention, Fernhill is clear.</figcaption></figure>
+      </div>
+<pre class="term" style="margin-top:24px"><span class="d"># let Claude shop at a retrofitted business</span>
+<span class="p">$</span> claude mcp add --transport http fernhill-shop http://localhost:8787/mcp/shop
+<span class="d"># then ask: "Book me a portrait session with Fernhill Studio"</span>
+
+<span class="d"># a bookkeeper's practice: one folder per client</span>
+<span class="p">$</span> pnpm retrofit practice --dir clients</pre>
+    </div>
+  </section>
+
+  <section class="alt" id="agents">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">AI agents</span>
@@ -724,7 +799,7 @@
     </div>
   </section>
 
-  <section class="alt" id="safety">
+  <section id="safety">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Safety</span>
@@ -759,7 +834,7 @@
     </div>
   </section>
 
-  <section id="screens">
+  <section class="alt" id="screens">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">The console</span>
@@ -776,7 +851,7 @@
     </div>
   </section>
 
-  <section class="alt" id="paypal">
+  <section id="paypal">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">PayPal platform</span>
@@ -789,7 +864,7 @@
             <tr><td>Invoicing v2</td><td>Create, get, update, send, remind, cancel, record payment, record refund, search</td></tr>
             <tr><td>Payments v2</td><td>Refunding captured invoice payments</td></tr>
             <tr><td>Catalog Products, Billing Plans, Subscriptions</td><td>Turning recurring agreements such as retainers into PayPal subscriptions</td></tr>
-            <tr><td>Webhooks v1</td><td>Registering the endpoint, signature verification, 15 event types across invoices, captures, subscriptions, sales and disputes</td></tr>
+            <tr><td>Webhooks v1</td><td>Registering the endpoint, signature verification, 17 event types across invoices, captures, checkout orders, subscriptions, sales and disputes</td></tr>
             <tr><td>Disputes v1</td><td>Listing and reading disputes for the Support agent; accepting claims only if the owner allows it</td></tr>
             <tr><td>Transaction Search</td><td>Fees and transaction history for the Ops agent</td></tr>
             <tr><td>PayPal Agent Toolkit</td><td>The Ops agent's read-only PayPal tools in sandbox and production; writes are deliberately not exposed</td></tr>
@@ -799,7 +874,7 @@
     </div>
   </section>
 
-  <section id="start">
+  <section class="alt" id="start">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Quick start</span>
@@ -836,6 +911,8 @@
               <li>Simulate a buyer dispute and draft a response.</li>
               <li>Open <b>Digest</b> and approve a reminder from its <b>Review</b> link.</li>
               <li>Press <b>Try your own data</b> and set up the sample plumbing business.</li>
+              <li>Open the <b>Shop</b> and buy a session, or let Claude buy it over MCP.</li>
+              <li>Switch to Brightside and pay two invoices from a customer's <b>Portal</b>.</li>
             </ol>
           </div>
           <div class="note">
@@ -847,7 +924,7 @@
     </div>
   </section>
 
-  <section class="alt" id="hackathon">
+  <section id="hackathon">
     <div class="wrap">
       <div class="hack">
         <div>
@@ -869,7 +946,7 @@
     </div>
   </section>
 
-  <section id="faq">
+  <section class="alt" id="faq">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">FAQ</span>
@@ -881,6 +958,8 @@
         <details><summary>Can the AI move money on its own?</summary><p>Only within rules you set. Agents can only propose actions; each kind of action has a policy (auto, confirm or never), optionally by amount, with daily caps. By default small refunds run on their own, larger ones, cancellations and reminders wait for your approval, and accepting disputes is refused.</p></details>
         <details><summary>Do I need to be technical?</summary><p>No. Run <code>paypal-retrofit serve</code> (or use a hosted copy) and the console opens a four-step setup wizard: upload CSV exports, check the mapping, choose your rules in plain words, preview, go live. After that the morning digest comes to your inbox or Slack, and you approve things from your phone.</p></details>
         <details><summary>Can I use it from Claude Desktop or Claude Code?</summary><p>Yes. retrofit is an MCP server: <code>paypal-retrofit mcp</code> over stdio, or <code>/mcp</code> over HTTP. Your Claude gets the same tools and the same rules as the built-in agent; anything that needs your OK still waits for it. Approving from the client is off unless you turn it on.</p></details>
+        <details><summary>Can AI shopping agents buy from my business?</summary><p>Yes, if you switch the shop on. retrofit turns your own product or services table into a catalogue that buyers' agents can search over MCP (<code>/mcp/shop</code>) and check out through PayPal. Prices always come from your data, you set the largest order, and the agent can only hand its user a PayPal link: a person approves every payment.</p></details>
+        <details><summary>I'm a bookkeeper. Can I run this for all my clients?</summary><p>Yes. <code>paypal-retrofit practice --dir clients</code> runs every client folder as its own workspace (its own data, PayPal account, rules and digest) and gives you one overview sorted by who needs attention. Add clients with the setup wizard.</p></details>
         <details><summary>Which AI model does it use?</summary><p>Claude through the official Anthropic SDK, defaulting to <code>claude-opus-5-5</code>. You can choose another model with <code>RETROFIT_MODEL</code>.</p></details>
         <details><summary>Is it production ready?</summary><p>Not yet. It is built and tested against PayPal's sandbox APIs and refuses production mode unless explicitly enabled. Treat it as a strong starting point, not a finished payments product.</p></details>
         <details><summary>Is this an official PayPal product?</summary><p>No. paypal-retrofit is an independent open-source project built on PayPal's public APIs and Agent Toolkit. It is not affiliated with or endorsed by PayPal.</p></details>

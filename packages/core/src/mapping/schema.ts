@@ -95,6 +95,9 @@ export const DEFAULT_POLICIES: Record<(typeof ACTION_KINDS)[number], z.infer<typ
   cancel_subscription: 'confirm',
   accept_dispute: 'never',
   offer_payment_plan: 'confirm',
+  apply_late_fee: 'confirm',
+  expire_discount: 'auto',
+  send_statement: 'confirm',
 };
 
 /** A conditional policy: the first rule whose kind and amount range match decides the mode. */
@@ -145,6 +148,37 @@ export const CollectionsPlaybook = z.object({
   promiseGraceDays: z.number().int().min(0).default(10),
 });
 
+/** Payment terms the owner sets: a late fee after a grace period, and a discount for paying early. */
+export const PaymentTerms = z.object({
+  lateFee: z
+    .object({
+      kind: z.enum(['percent', 'flat']),
+      /** Percent of the amount due, or a flat amount in the mapping currency. */
+      amount: z.number().positive(),
+      /** Days overdue before the fee is added. */
+      afterDays: z.number().int().min(0).default(30),
+      label: z.string().default('Late payment fee'),
+    })
+    .optional(),
+  earlyDiscount: z
+    .object({
+      percent: z.number().positive().max(50),
+      /** Days from the invoice date during which the discount applies. */
+      withinDays: z.number().int().min(1).default(10),
+    })
+    .optional(),
+});
+
+/** Agentic commerce: a catalogue from the product table that buyers' agents can check out through PayPal Orders. */
+export const Commerce = z.object({
+  enabled: z.boolean().default(false),
+  /** Largest order a buyer (or a buyer's agent) can create. */
+  maxOrderTotal: z.number().positive().default(2000),
+  maxQuantity: z.number().int().positive().default(20),
+  /** One line shown to buyers' agents about what the business sells. */
+  description: z.string().optional(),
+});
+
 export const RetrofitMapping = z.object({
   version: z.literal(1),
   currency: z.string().length(3).default('USD'),
@@ -159,6 +193,8 @@ export const RetrofitMapping = z.object({
   limits: z.array(ActionLimit).default([]),
   quietHours: QuietHours.optional(),
   collections: CollectionsPlaybook.default({}),
+  terms: PaymentTerms.default({}),
+  commerce: Commerce.default({}),
   /** Why each part of the mapping was chosen. Keys are dotted paths such as "invoice.fields.total". */
   rationale: z.record(z.string(), z.string()).default({}),
   confidence: z.record(z.string(), z.number().min(0).max(1)).default({}),
@@ -170,6 +206,8 @@ export type ApprovalRule = z.infer<typeof ApprovalRule>;
 export type ActionLimit = z.infer<typeof ActionLimit>;
 export type QuietHours = z.infer<typeof QuietHours>;
 export type CollectionsPlaybook = z.infer<typeof CollectionsPlaybook>;
+export type PaymentTerms = z.infer<typeof PaymentTerms>;
+export type Commerce = z.infer<typeof Commerce>;
 
 /**
  * Controls retrofit recommends for a new mapping: small refunds run on their own, big ones and daily
@@ -195,7 +233,7 @@ export function recommendedControls(timezone = 'UTC') {
       end: '08:00',
       timezone,
       weekends: true,
-      kinds: ['send_reminder', 'offer_payment_plan'],
+      kinds: ['send_reminder', 'offer_payment_plan', 'apply_late_fee', 'send_statement'],
     } satisfies QuietHours,
   };
 }

@@ -38,6 +38,11 @@ interface RunnableTool {
 
 const READ_ONLY = new Set([
   'business_summary',
+  'customer_accounts',
+  'customer_statement',
+  'customer_requests',
+  'sales_orders',
+  'payment_terms',
   'collections_plan',
   'cash_forecast',
   'payment_risk',
@@ -268,3 +273,4 @@ export function mcpHttpHandler(getRf: () => Retrofit, opts: McpOptions = {}) {
     await transport.handleRequest(req, res, req.body);
   };
 }
+export * from './shop.ts';

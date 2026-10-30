@@ -1,5 +1,5 @@
 import type { SchemaDescription, TableInfo } from '../types.ts';
-import { CollectionsPlaybook, recommendedControls, type RetrofitMapping } from './schema.ts';
+import { CollectionsPlaybook, Commerce, recommendedControls, type RetrofitMapping } from './schema.ts';
 
 /**
  * A deterministic, name-based mapper. Used when no Claude API key is configured, and as a hint for the
@@ -132,6 +132,8 @@ export function heuristicMapping(
     policies: {},
     ...recommendedControls(timezone),
     collections: CollectionsPlaybook.parse({}),
+    terms: {},
+    commerce: Commerce.parse({}),
     rationale: {
       'customer.table': `"${customers.name}" has the strongest customer/contact signals`,
       'invoice.table': `"${invoices.name}" has invoice-like columns and references "${customers.name}"`,

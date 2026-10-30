@@ -39,7 +39,7 @@ export interface SetupOptions {
   invoicePrefix?: () => string;
   isConfigured: () => boolean;
   /** Switch the running server to a new config. */
-  activate: (configPath: string) => Promise<Retrofit>;
+  activate: (configPath: string) => Promise<{ rf: Retrofit; consoleUrl: string }>;
 }
 
 interface Session {
@@ -415,7 +415,7 @@ export function setupRouter(opts: SetupOptions) {
         path.join(path.dirname(configPath), 'retrofit.map.json'),
         JSON.stringify(mapping, null, 2) + '\n',
       );
-      const rf = await opts.activate(configPath);
+      const { rf, consoleUrl } = await opts.activate(configPath);
       let synced: { executed: number; pending: number } | null = null;
       if (b.syncNow) {
         const report = await rf.sync({ origin: 'dashboard' });
@@ -425,7 +425,7 @@ export function setupRouter(opts: SetupOptions) {
         };
       }
       sessions.delete(s.id);
-      res.json({ ok: true, configPath: path.relative(process.cwd(), configPath), synced });
+      res.json({ ok: true, configPath: path.relative(process.cwd(), configPath), consoleUrl, synced });
     }),
   );
 

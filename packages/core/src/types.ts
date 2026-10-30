@@ -48,17 +48,20 @@ export const ACTION_KINDS = [
   'cancel_subscription',
   'accept_dispute',
   'offer_payment_plan',
+  'apply_late_fee',
+  'expire_discount',
+  'send_statement',
 ] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
 export interface ActionTarget {
-  entity: 'invoice' | 'subscription';
+  entity: 'invoice' | 'subscription' | 'customer';
   legacyPk: string;
   paypalId?: string;
   label?: string;
 }
 
-export type ActionOrigin = 'sync' | 'agent' | 'dashboard' | 'cli' | 'reconcile';
+export type ActionOrigin = 'sync' | 'agent' | 'dashboard' | 'cli' | 'reconcile' | 'portal';
 
 export interface ActionRecord {
   id: number;

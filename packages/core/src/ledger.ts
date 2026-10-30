@@ -137,6 +137,16 @@ export async function summary(rf: Retrofit) {
   const open = inv.filter((r) => r.legacyState === 'open');
   const overdue = open.filter((r) => (r.daysOverdue ?? 0) > 0);
   const forecast = await cashForecast(rf);
+  // Portal payments are PayPal payments recorded against the invoice, so PayPal shows MARKED_AS_PAID.
+  const paidInPortal = new Set(
+    rf.state
+      .listPayments()
+      .filter((p) => p.entity === 'invoice' && p.kind === 'payment' && p.method === 'PAYPAL')
+      .map((p) => p.legacyPk),
+  );
+  const paidViaPayPal = inv.filter(
+    (r) => r.paypalStatus === 'PAID' || (r.paypalStatus === 'MARKED_AS_PAID' && paidInPortal.has(r.legacyPk)),
+  );
   return {
     business: rf.config.business.name,
     currency: rf.mapping.currency,
@@ -151,11 +161,8 @@ export async function summary(rf: Retrofit) {
     openAmount: sum(open, (r) => r.legacyTotal),
     overdue: overdue.length,
     overdueAmount: sum(overdue, (r) => r.legacyTotal),
-    paidViaPayPal: inv.filter((r) => r.paypalStatus === 'PAID').length,
-    paidViaPayPalAmount: sum(
-      inv.filter((r) => r.paypalStatus === 'PAID'),
-      (r) => r.paypalPaid ?? r.legacyTotal,
-    ),
+    paidViaPayPal: paidViaPayPal.length,
+    paidViaPayPalAmount: sum(paidViaPayPal, (r) => r.paypalPaid ?? r.legacyTotal),
     subscriptions: rows.filter((r) => r.entity === 'subscription').length,
     discrepancies: rf.state.listDiscrepancies().length,
     pendingActions: rf.state.listActions('pending').length,

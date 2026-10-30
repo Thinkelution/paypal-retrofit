@@ -275,6 +275,28 @@ export class PayPalClient {
   }
 
   // ---- Webhooks ----
+  // ---- Orders v2 (portal payments, shop and agent checkouts)
+  createOrder(body: unknown, idempotencyKey: string) {
+    return this.request<PayPalOrder>('POST', '/v2/checkout/orders', body, {
+      idempotencyKey,
+      representation: true,
+    });
+  }
+  getOrder(id: string) {
+    return this.request<PayPalOrder>('GET', `/v2/checkout/orders/${encodeURIComponent(id)}`);
+  }
+  captureOrder(id: string, idempotencyKey: string) {
+    return this.request<PayPalOrder>(
+      'POST',
+      `/v2/checkout/orders/${encodeURIComponent(id)}/capture`,
+      {},
+      {
+        idempotencyKey,
+        representation: true,
+      },
+    );
+  }
+
   createWebhook(url: string, eventTypes: string[]) {
     return this.request<{ id: string; url: string }>('POST', '/v1/notifications/webhooks', {
       url,
@@ -343,6 +365,25 @@ export const CANCELLED_STATUSES = ['CANCELLED'];
 export const REFUNDED_STATUSES = ['REFUNDED', 'MARKED_AS_REFUNDED', 'PARTIALLY_REFUNDED'];
 export const OPEN_STATUSES = ['DRAFT', 'SENT', 'SCHEDULED', 'UNPAID', 'PAYMENT_PENDING', 'PARTIALLY_PAID'];
 
+export interface PayPalOrder {
+  id: string;
+  status: 'CREATED' | 'SAVED' | 'APPROVED' | 'VOIDED' | 'COMPLETED' | 'PAYER_ACTION_REQUIRED';
+  links?: Array<{ href: string; rel: string; method?: string }>;
+  purchase_units?: Array<{
+    reference_id?: string;
+    custom_id?: string;
+    payments?: {
+      captures?: Array<{
+        id: string;
+        status: string;
+        create_time?: string;
+        amount?: Money;
+        seller_receivable_breakdown?: { paypal_fee?: Money };
+      }>;
+    };
+  }>;
+}
+
 export const WEBHOOK_EVENTS = [
   'INVOICING.INVOICE.PAID',
   'INVOICING.INVOICE.CANCELLED',
@@ -359,4 +400,6 @@ export const WEBHOOK_EVENTS = [
   'CUSTOMER.DISPUTE.CREATED',
   'CUSTOMER.DISPUTE.UPDATED',
   'CUSTOMER.DISPUTE.RESOLVED',
+  'CHECKOUT.ORDER.APPROVED',
+  'CHECKOUT.ORDER.COMPLETED',
 ];

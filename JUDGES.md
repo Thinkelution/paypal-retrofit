@@ -22,7 +22,11 @@ What to try (about 3 minutes):
 12. **Try your own data** (top bar) opens the no-code setup wizard. Upload CSV exports, or pick the **Brightside Plumbing** sample (odd column names: `bills`, `reference`, `amount_due`, `state`). Check the mapping, set the rules in plain words, preview the first sync, **Go live**: the console switches to the new business without a restart. **Back to Fernhill** returns to the demo.
 13. **Connect Claude (MCP)** (footer) shows how to plug Claude Code or Claude Desktop into the same engine. With Claude Code: `claude mcp add --transport http paypal-retrofit <demo-url>/mcp`, then ask "give me my morning briefing" or "chase the overdue invoices". Anything that needs approval still waits in **Approvals**.
 
-Shortcut: `node scripts/stage-demo.mjs` puts a fresh demo into this lived-in state in a few seconds.
+14. **Shop**: Fernhill sells its services online. Open the **Shop page ↗**, buy a portrait session and pay on the test checkout: the order is captured and booked with its PayPal fee. Or let an AI agent do it: `claude mcp add --transport http fernhill-shop <demo-url>/mcp/shop`, then "book me a portrait session with Fernhill Studio". The agent gets a PayPal link; you approve the payment.
+15. Switch to **Brightside Plumbing** (client picker, top bar), a second business that runs on CSV exports. **Customers** shows each customer's balance, what they asked for in their portal, and the owner's payment terms (2% late fee after 30 days, 2% off for paying within 10 days). Open **Portal ↗** on any customer: that is the private page the customer gets. Tick two invoices, **Pay selected with PayPal**, approve, and both are paid in one checkout. Try "I'll pay by…" or "Pay in 3 parts": reminders hold, and the plan offer appears in Approvals.
+16. **All clients** (client picker → All clients…) is the bookkeeper's view: every client on one screen, sorted by who needs attention.
+
+Shortcut: `node scripts/stage-demo.mjs` puts a fresh demo into this lived-in state in a few seconds, including a buyer-agent order and Brightside's portal activity.
 
 ## Run it locally (under 10 minutes)
 
@@ -62,7 +66,7 @@ Log in to <https://www.sandbox.paypal.com> as the buyer to pay an invoice. PayPa
 ## Checks
 
 ```bash
-pnpm test         # 37 tests: engine, webhooks, reconcile, CSV, agents, digest, setup wizard, MCP; all offline
+pnpm test         # 43 tests: engine, webhooks, reconcile, CSV, agents, digest, setup wizard, MCP, terms, portal, shop, multi-client; all offline
 pnpm smoke:sandbox   # live sandbox: create, send and record one invoice (needs credentials)
 ```
 

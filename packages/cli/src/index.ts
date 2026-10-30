@@ -11,7 +11,9 @@ import {
   exportJournal,
   forecast,
   mcp,
+  practice,
   registerWebhook,
+  statements,
   runReconcile,
   serve,
   status,
@@ -125,7 +127,24 @@ program
   .command('mcp')
   .description('Run as an MCP server on stdio for Claude Desktop, Claude Code or any MCP client')
   .option('--allow-approve', 'let the MCP client approve and reject pending actions')
+  .option(
+    '--shop',
+    "serve the buyer-facing shop tools instead (catalogue and PayPal checkout for shoppers' agents)",
+  )
   .action(run((o) => mcp({ ...o, config: cfg() })));
+
+program
+  .command('practice')
+  .description("A bookkeeper's practice: every client folder in --dir becomes a workspace, with one overview")
+  .option('-d, --dir <dir>', 'folder with one sub-folder per client', 'clients')
+  .option('-p, --port <port>')
+  .action(run((o) => practice(o)));
+
+program
+  .command('statements')
+  .description('Customer balances; --run queues a statement email for each customer with an open balance')
+  .option('--run', 'queue the statements (policy "confirm" by default)')
+  .action(run((o) => statements({ ...o, config: cfg() })));
 
 program
   .command('digest')

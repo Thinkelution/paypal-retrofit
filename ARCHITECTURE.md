@@ -18,6 +18,10 @@
 | `agents` | Mapper (structured outputs), Ops (SDK tool runner), Support (structured outputs); tools for the engine and the PayPal Agent Toolkit bridge. |
 | `server` | Express: `/webhooks/paypal`, `/api/*`, SSE `/api/stream`, `/mcp`, `/a/:token` approval pages, static console, optional basic auth. `host` wraps it so the active workspace can change at runtime (setup wizard); `setup` is the wizard's API; `digest` delivers the owner's digest. |
 | `mcp` | MCP server over the engine tools: stdio (`paypal-retrofit mcp`) and stateless Streamable HTTP, with prompts and resources. |
+| `core/terms` | Late fees and early-payment discounts: what is due, proposals, and the expected PayPal total (legacy total + adjustments) used by collections, risk, statements and reconciliation. |
+| `core/statements` | Customer balances, statements with aging, rendering as email. |
+| `core/commerce` | PayPal Orders checkout for the customer portal (several invoices), the shop and buyer agents; capture and booking. |
+| `mcp/shop` | Buyer-facing MCP server: catalogue search and checkout links for AI shopping agents. |
 | `core/digest` | Builds the owner's digest, renders it as HTML email, text and Slack Block Kit, signs and verifies approval-link tokens, decides when the scheduled digest is due. |
 | `cli` | Commander CLI; `demo` mounts mock PayPal and Fernhill next to the console. |
 | `mock-paypal` | In-memory PayPal stand-in with signed webhooks and buyer pages; used by tests and the offline demo. |
@@ -32,6 +36,18 @@
 ## Setup wizard and workspaces
 
 `createHost` holds the active `Retrofit` and its Express app. Before a config exists it serves only the console (which shows the wizard) and `/api/setup/*`. A setup session copies or receives CSVs into its own workspace folder (or records a SQLite path / Postgres URL when the server allows it), introspects it, asks the Mapper for a mapping, and previews `plan()` against an in-memory state store and a dummy PayPal client. `finish` writes the config and mapping and calls `activate`, which builds a new engine and server, stops the old one's timers and closes it. On `serve` the config goes where `-c` points and setup closes once configured; on the demo every wizard run gets its own workspace and invoice-number prefix, and **Reset demo** re-activates Fernhill.
+
+## Customer portal, shop and buyer agents
+
+Public, server-rendered routes in each workspace: `/p/:token` (portal), `/shop`, `/shop/catalog.json`, `/checkout/return` and `POST /mcp/shop`. A portal token is an HMAC-signed, 120-day link to one customer key. Paying several invoices creates one PayPal order whose items are the invoices; after capture, retrofit records a PayPal payment against each invoice (idempotency key per order and invoice), refreshes them (write-back follows) and splits the capture fee by amount in the payments ledger. Shop and agent orders take items and prices from the product table only, are capped by `commerce.maxOrderTotal`, and are booked as `order` payments. `CHECKOUT.ORDER.APPROVED` and `PAYMENT.CAPTURE.COMPLETED` (with `supplementary_data.related_ids.order_id`) finalize orders, so a buyer who closes the tab is still captured. Portal requests are stored in `requests`; collections holds on open promises and questions and queues a plan offer for plan requests; late fees skip any invoice with an open request.
+
+## Payment terms
+
+The early-payment discount is added to new PayPal invoices as a fixed `invoice_discount.amount` while its window is open, recorded as a negative adjustment, and removed by `expire_discount` (policy auto) when the window closes. A late fee (`apply_late_fee`, policy confirm) adds an item to the PayPal invoice with `send_to_recipient`. Every place that compares amounts uses `expectedTotal = legacy total + applied adjustments`.
+
+## Multi-client host
+
+`createHost` holds a map of workspaces. In `single` mode one business sits at the root; in `practice` mode the root is an overview and every client is at `/c/<id>`; the demo mode keeps Fernhill at the root and adds Brightside (and wizard-made clients) at `/c/<id>`. The console detects `/c/<id>` and prefixes its API calls; host-level APIs (`/api/setup`, `/api/host`, `/api/practice`) stay at the root.
 
 ## Owner's digest
 
@@ -88,6 +104,10 @@ meta(key, value)
 plans(legacy_pk, paypal_id, installments, installment_amount, total, schedule, status, created_at, updated_at)
 payments(id, entity, legacy_pk, paypal_id, kind, gross, fee, net, currency, method, occurred_at, recorded_at)
 digests(id, created_at, trigger, subject, deliveries, html, text)
+adjustments(id, legacy_pk, kind, amount, status, detail, until, created_at, updated_at)
+requests(id, customer_pk, legacy_pk, kind, detail, until, installments, status, created_at, resolved_at)
+orders(id, paypal_order_id, channel, status, items, invoices, total, currency, buyer, approve_url, capture_id, fee, created_at, updated_at)
+outbox(id, kind, customer_pk, recipient, subject, html, text, status, detail, created_at)
 ```
 
 ## Security notes

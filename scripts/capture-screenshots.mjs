@@ -114,6 +114,10 @@ const SHOTS = [
   { file: 'legacy.png', url: '/fernhill/', w: 1280, h: 800, scheme: 'light' },
   { file: 'mobile.png', url: '/', w: 390, h: 844, mobile: true },
   { file: 'digest.png', url: '/#digest', w: 1440, h: 1000 },
+  { file: 'customers.png', url: '/c/brightside/#customers', w: 1440, h: 1000 },
+  { file: 'shop.png', url: '/#shop', w: 1440, h: 1000 },
+  { file: 'practice.png', url: '/#practice', w: 1440, h: 760 },
+  { file: 'storefront.png', url: '/shop', w: 1100, h: 860, scheme: 'light' },
   { file: 'mcp.png', url: '/', w: 1440, h: 900, clicks: ['Connect Claude (MCP)'] },
   {
     file: 'setup-rules.png',
@@ -148,6 +152,10 @@ try {
   await waitForChrome();
   const ledger = await (await fetch(`${base}/api/ledger`)).json();
   const unpaid = ledger.find((r) => r.entity === 'invoice' && r.paypalStatus === 'SENT');
+  const customers = await (await fetch(`${base}/c/brightside/api/customers`)).json().catch(() => []);
+  const portal = customers.find?.((c) => c.name === 'Rockridge Florist')?.portalUrl;
+  if (portal)
+    SHOTS.push({ file: 'portal.png', url: new URL(portal).pathname, w: 900, h: 900, scheme: 'light' });
   if (unpaid?.payLink)
     SHOTS.push({
       file: 'pay.png',

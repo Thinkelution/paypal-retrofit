@@ -7,7 +7,7 @@ import {
   type Retrofit,
 } from '@paypal-retrofit/core';
 import { createMockPayPal } from '@paypal-retrofit/mock-paypal';
-import { createHost } from '@paypal-retrofit/server';
+import { createHost, SAMPLES_DIR } from '@paypal-retrofit/server';
 import { createFernhillApp, openDb, seed, seedInto } from 'fernhill-legacy-invoicer';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,10 +21,35 @@ export interface DemoOptions {
   sync?: boolean;
 }
 
+const TZ = () => process.env.RETROFIT_TIMEZONE ?? 'America/Los_Angeles';
+
 /**
- * One process with everything: the Fernhill legacy app (/fernhill), a mock PayPal (/mock-paypal),
- * retrofit's API + dashboard (/), and webhooks flowing between them. No accounts needed.
- * With PAYPAL_CLIENT_ID/SECRET set and --sandbox it uses the real PayPal sandbox instead of the mock.
+ * Writes a workspace's config and mapping for a demo business. The mapping comes from the Mapper agent
+ * (Claude when configured, otherwise the rule-based mapper), then `extra` adds demo settings.
+ */
+async function demoWorkspace(
+  dir: string,
+  source: string,
+  config: Parameters<typeof writeConfig>[1],
+  extra: (m: RetrofitMapping) => RetrofitMapping,
+) {
+  const src = openSource(source, dir);
+  const schema = await src.introspect();
+  await src.close();
+  const r = await proposeMapping(schema, { timezone: TZ() });
+  if (!r.mapping) throw new Error(`Could not map ${source}`);
+  fs.writeFileSync(
+    path.join(dir, 'retrofit.map.json'),
+    JSON.stringify(extra(RetrofitMapping.parse(r.mapping)), null, 2),
+  );
+  writeConfig(path.join(dir, 'retrofit.config.yaml'), config);
+}
+
+/**
+ * One process with everything: the Fernhill legacy app (/fernhill), a mock PayPal (/mock-paypal), a
+ * second client (Brightside Plumbing, CSV exports, at /c/brightside), retrofit's console, portal, shop
+ * and MCP endpoints, and webhooks flowing between them. No accounts needed. With PAYPAL_CLIENT_ID/SECRET
+ * set and --sandbox it uses the real PayPal sandbox instead of the mock.
  */
 export async function demo(opts: DemoOptions & { sandbox?: boolean }) {
   const port = Number(opts.port ?? process.env.PORT ?? 8787);
@@ -46,43 +71,75 @@ export async function demo(opts: DemoOptions & { sandbox?: boolean }) {
   } else {
     process.env.PAYPAL_ENVIRONMENT = 'SANDBOX';
   }
+  const prefix = (p: string) => (useMock ? '' : `${p}${Date.now().toString(36).slice(-4).toUpperCase()}-`);
 
+  // ---- Fernhill Studio: the legacy app's SQLite database, at the root
   const dbFile = path.join(dir, 'fernhill.db');
   if (!fs.existsSync(dbFile)) seed({ file: dbFile, buyerEmail: process.env.FERNHILL_BUYER_EMAIL });
-
-  const configFile = path.join(dir, 'retrofit.config.yaml');
-  if (!fs.existsSync(configFile)) {
-    const src = openSource(`sqlite:${dbFile}`);
-    const schema = await src.introspect();
-    await src.close();
+  const fernhillConfig = path.join(dir, 'retrofit.config.yaml');
+  if (!fs.existsSync(fernhillConfig)) {
     console.log(
       c.dim(
         claudeConfigured()
-          ? 'Asking Claude to map the Fernhill schema…'
-          : 'Mapping the Fernhill schema with the heuristic mapper…',
+          ? 'Asking Claude to map the demo data…'
+          : 'Mapping the demo data with the rule-based mapper…',
       ),
     );
-    const r = await proposeMapping(schema, {
-      timezone: process.env.RETROFIT_TIMEZONE ?? 'America/Los_Angeles',
-    });
-    if (!r.mapping) throw new Error('Could not map the demo schema');
-    fs.writeFileSync(
-      path.join(dir, 'retrofit.map.json'),
-      JSON.stringify(RetrofitMapping.parse(r.mapping), null, 2),
-    );
-    writeConfig(configFile, {
-      source: 'sqlite:./fernhill.db',
-      mapping: './retrofit.map.json',
-      state: './state.db',
-      business: { name: 'Fernhill Studio', website: `${publicUrl}/fernhill` },
-      paypal: {
-        invoicePrefix: useMock ? '' : `FH${Date.now().toString(36).slice(-4).toUpperCase()}-`,
-        returnUrl: `${publicUrl}/fernhill/retainers`,
+    await demoWorkspace(
+      dir,
+      'sqlite:./fernhill.db',
+      {
+        source: 'sqlite:./fernhill.db',
+        mapping: './retrofit.map.json',
+        state: './state.db',
+        business: { name: 'Fernhill Studio', website: `${publicUrl}/fernhill` },
+        paypal: { invoicePrefix: prefix('FH'), returnUrl: `${publicUrl}/fernhill/retainers` },
+        webhook: { publicUrl: `${publicUrl}/webhooks/paypal` },
+        sync: { intervalSeconds: 60 },
       },
-      webhook: { publicUrl: `${publicUrl}/webhooks/paypal` },
-      sync: { intervalSeconds: 60 },
-    });
+      // Fernhill sells its services online too: the shop and the buyer-agent MCP endpoint.
+      (m) => ({
+        ...m,
+        commerce: {
+          enabled: true,
+          maxOrderTotal: 2500,
+          maxQuantity: 10,
+          description: 'Portrait, product and event photography in Portland, Oregon.',
+        },
+      }),
+    );
   }
+
+  // ---- Brightside Plumbing: CSV exports, a second client at /c/brightside, with payment terms
+  const brightDir = path.join(dir, 'brightside');
+  const brightConfig = path.join(brightDir, 'retrofit.config.yaml');
+  const createBrightside = async () => {
+    fs.rmSync(brightDir, { recursive: true, force: true });
+    fs.mkdirSync(path.join(brightDir, 'data'), { recursive: true });
+    for (const f of fs.readdirSync(SAMPLES_DIR).filter((x) => x.endsWith('.csv')))
+      fs.copyFileSync(path.join(SAMPLES_DIR, f), path.join(brightDir, 'data', f));
+    await demoWorkspace(
+      brightDir,
+      'csv:./data',
+      {
+        source: 'csv:./data',
+        mapping: './retrofit.map.json',
+        state: './state.db',
+        business: { name: 'Brightside Plumbing' },
+        paypal: { invoicePrefix: prefix('BP') },
+        webhook: { publicUrl: `${publicUrl}/c/brightside/webhooks/paypal` },
+        sync: { intervalSeconds: 60 },
+      },
+      (m) => ({
+        ...m,
+        terms: {
+          lateFee: { kind: 'percent', amount: 2, afterDays: 30, label: 'Late payment fee (2%)' },
+          earlyDiscount: { percent: 2, withinDays: 10 },
+        },
+      }),
+    );
+  };
+  if (!fs.existsSync(brightConfig)) await createBrightside();
 
   const log = (m: string) => console.error(`[mock-paypal] ${m}`);
   const mock = useMock
@@ -95,8 +152,8 @@ export async function demo(opts: DemoOptions & { sandbox?: boolean }) {
   const fernDb = openDb(dbFile);
   const fernApp = createFernhillApp(() => fernDb, '/fernhill');
 
-  const ensureWebhook = async (rf: Retrofit) => {
-    const url = useMock ? `${internal}/webhooks/paypal` : `${publicUrl}/webhooks/paypal`;
+  const ensureWebhook = async (rf: Retrofit, ws: { path: string }) => {
+    const url = useMock ? `${internal}${ws.path}/webhooks/paypal` : `${publicUrl}${ws.path}/webhooks/paypal`;
     if (!useMock && !/^https:/.test(url)) {
       console.log(
         c.yellow(
@@ -110,37 +167,49 @@ export async function demo(opts: DemoOptions & { sandbox?: boolean }) {
     rf.state.setMeta('paypal.webhookId', wh.id);
   };
 
-  const fernhillConfig = path.resolve(configFile);
   const host = createHost({
+    mode: 'demo',
     configPath: fernhillConfig,
-    server: (_rf, activePath) => ({
+    defaultId: 'fernhill',
+    workspaces: [{ id: 'brightside', configPath: brightConfig }],
+    server: (_rf, _configPath, ws) => ({
       watch: false,
       reconcileEverySeconds: 120,
       mounts: [
         ...(mock ? [{ path: '/mock-paypal', router: mock.app, public: true }] : []),
-        { path: '/fernhill', router: fernApp },
+        ...(ws.path === '' ? [{ path: '/fernhill', router: fernApp }] : []),
       ],
       demo: {
-        legacyAppPath: '/fernhill',
+        legacyAppPath: ws.path === '' ? '/fernhill' : '',
         mockPath: mock ? '/mock-paypal' : '',
-        custom: activePath !== fernhillConfig,
+        custom: ws.path !== '',
         reset: async () => {
           if (!mock) throw new Error('Reset is only available with the mock');
-          if (host.configPath !== fernhillConfig) await host.activate(fernhillConfig);
-          const rf = host.rf!;
+          mock.reset();
+          // Clients added with the setup wizard go; Fernhill and Brightside start again.
+          for (const id of [...host.workspaces.keys()])
+            if (id !== 'fernhill' && id !== 'brightside') await host.remove(id);
+          const rf = host.workspaces.get('fernhill')!.rf;
           seedInto(fernDb);
           rf.state.db.exec(
-            'DELETE FROM links; DELETE FROM events; DELETE FROM actions; DELETE FROM discrepancies; DELETE FROM meta; DELETE FROM plans; DELETE FROM payments; DELETE FROM digests;',
+            'DELETE FROM links; DELETE FROM events; DELETE FROM actions; DELETE FROM discrepancies; DELETE FROM meta; DELETE FROM plans; DELETE FROM payments; DELETE FROM digests; DELETE FROM adjustments; DELETE FROM requests; DELETE FROM orders; DELETE FROM outbox;',
           );
-          mock.reset();
-          await ensureWebhook(rf);
+          await ensureWebhook(rf, { path: '' });
+          await host.remove('brightside');
+          await createBrightside();
+          const b = await host.activate(brightConfig, { id: 'brightside' });
+          await b.sync();
           rf.emit('reset');
         },
         dispute: async (paypalInvoiceId: string) => {
           if (!mock) throw new Error('Disputes are opened by buyers in the PayPal sandbox');
           const r = await fetch(
             `${internal}/mock-paypal/mock/api/invoices/${encodeURIComponent(paypalInvoiceId)}/dispute`,
-            { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: '{}',
+            },
           );
           const body: any = await r.json();
           if (!r.ok) throw new Error(body?.message ?? 'Could not open a dispute');
@@ -159,18 +228,23 @@ export async function demo(opts: DemoOptions & { sandbox?: boolean }) {
   });
   const { app } = host;
 
-  // Listen first: activating registers the webhook with the mock PayPal served by this same process.
+  // Listen first: activating registers webhooks with the mock PayPal served by this same process.
   await new Promise<void>((resolve) => app.listen(port, resolve));
   await host.start();
+  const bright = host.workspaces.get('brightside')?.rf;
+  if (bright && bright.state.listLinks().length === 0) await bright.sync();
   if (opts.sync) await host.rf!.sync();
   console.log(`
 ${c.bold('paypal-retrofit demo')} ${c.dim(useMock ? '(mock PayPal, no account needed)' : '(PayPal sandbox)')}
-  Dashboard          ${c.cyan(publicUrl + '/')}
-  Legacy app         ${c.cyan(publicUrl + '/fernhill')}
-  Your own data      ${c.cyan(publicUrl + '/#setup')}
-  MCP endpoint       ${c.cyan(publicUrl + '/mcp')}
-  ${useMock ? `Mock PayPal        ${c.cyan(publicUrl + '/mock-paypal/mock/state')}` : ''}
-  Ops agent          ${claudeConfigured() ? c.green('on') : c.yellow('off (set ANTHROPIC_API_KEY)')}
-  Data               ${c.dim(dir)}
+  Console (Fernhill)   ${c.cyan(publicUrl + '/')}
+  Second client        ${c.cyan(publicUrl + '/c/brightside/')}
+  All clients          ${c.cyan(publicUrl + '/#practice')}
+  Legacy app           ${c.cyan(publicUrl + '/fernhill')}
+  Shop (buyers)        ${c.cyan(publicUrl + '/shop')}
+  Your own data        ${c.cyan(publicUrl + '/#setup')}
+  MCP (owner / buyer)  ${c.cyan(publicUrl + '/mcp')}  ${c.cyan(publicUrl + '/mcp/shop')}
+  ${useMock ? `Mock PayPal          ${c.cyan(publicUrl + '/mock-paypal/mock/state')}` : ''}
+  Ops agent            ${claudeConfigured() ? c.green('on') : c.yellow('off (set ANTHROPIC_API_KEY)')}
+  Data                 ${c.dim(dir)}
 `);
 }

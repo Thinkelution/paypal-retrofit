@@ -140,7 +140,7 @@ export async function invoiceRisks(rf: Retrofit, today = todayIso()): Promise<In
   for (const inv of open) {
     const link = rf.state.getLink('invoice', inv.pk);
     const paid = link?.paypalPaid ?? 0;
-    const amountDue = round2(inv.total - paid);
+    const amountDue = round2(inv.total + rf.state.adjustmentTotal(inv.pk) - paid);
     if (amountDue <= 0 || (link?.paypalStatus && PAID_STATUSES.includes(link.paypalStatus))) continue;
     const prof = profiles.get(inv.customerPk);
     const daysOverdue = inv.due ? Math.max(0, daysBetween(inv.due, today)) : 0;
@@ -334,11 +334,12 @@ export interface JournalRow {
 export async function journal(rf: Retrofit, from?: string, to?: string): Promise<JournalRow[]> {
   const invoices = new Map((await loadInvoices(rf.source, rf.mapping)).map((i) => [i.pk, i]));
   return rf.state.listPayments(from, to).map((p) => {
-    const inv = invoices.get(p.legacyPk);
+    const inv = p.entity === 'invoice' ? invoices.get(p.legacyPk) : undefined;
+    const order = p.entity === 'order' ? rf.state.getOrder(p.legacyPk) : undefined;
     return {
       date: p.occurredAt.slice(0, 10),
-      invoice: inv?.number ?? p.legacyPk,
-      customer: inv?.customer?.name ?? '',
+      invoice: inv?.number ?? (order ? `Order ${order.id}` : p.legacyPk),
+      customer: inv?.customer?.name ?? order?.buyer?.name ?? order?.buyer?.email ?? '',
       kind: p.kind,
       gross: p.gross,
       fee: p.fee,

@@ -1,6 +1,7 @@
 import type { Retrofit } from './engine.ts';
 import { loadInvoices } from './entities.ts';
 import { OPEN_STATUSES, PAID_STATUSES, PayPalError } from './paypal/client.ts';
+import { expectedTotal } from './terms.ts';
 import { cents, toMoney } from './util.ts';
 
 export interface ReconcileReport {
@@ -54,12 +55,14 @@ export async function reconcile(rf: Retrofit): Promise<ReconcileReport> {
 
       const ppOpen = OPEN_STATUSES.includes(pp.status);
       const ppTotal = pp.amount?.value !== undefined ? cents(pp.amount.value) : null;
-      if (ppTotal !== null && ppOpen && ppTotal !== cents(inv.total)) {
+      // Late fees and early-payment discounts are expected differences.
+      const expected = expectedTotal(rf, inv.pk, inv.total);
+      if (ppTotal !== null && ppOpen && ppTotal !== cents(expected)) {
         flag(
           inv.pk,
           pp.id,
           'amount_mismatch',
-          `${inv.number}: legacy total ${toMoney(inv.total)} but PayPal shows ${toMoney(ppTotal / 100)}`,
+          `${inv.number}: expected ${toMoney(expected)}${expected !== inv.total ? ` (legacy ${toMoney(inv.total)} with fees and discounts)` : ''} but PayPal shows ${toMoney(ppTotal / 100)}`,
           'Run sync to update the PayPal invoice, or correct the legacy record.',
         );
       }

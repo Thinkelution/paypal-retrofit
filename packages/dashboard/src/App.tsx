@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react';
-import { ago, api, fmtMoney, type Config, type LedgerRow, type SetupStatus } from './api';
+import {
+  ago,
+  api,
+  BASE,
+  fmtMoney,
+  type Config,
+  type HostInfo,
+  type LedgerRow,
+  type SetupStatus,
+} from './api';
 import { AgentPanel } from './components/AgentPanel';
 import { DisputeDraft } from './components/DisputeDraft';
 import { McpConnect } from './components/McpConnect';
@@ -14,15 +23,29 @@ import { Collections } from './pages/Collections';
 import { Insights } from './pages/Insights';
 import { Digest } from './pages/Digest';
 import { Setup } from './pages/Setup';
+import { Customers } from './pages/Customers';
+import { Shop } from './pages/Shop';
+import { Practice } from './pages/Practice';
 
 type Tab =
-  'ledger' | 'collections' | 'insights' | 'approvals' | 'digest' | 'discrepancies' | 'mapping' | 'activity';
+  | 'ledger'
+  | 'collections'
+  | 'customers'
+  | 'insights'
+  | 'approvals'
+  | 'digest'
+  | 'shop'
+  | 'discrepancies'
+  | 'mapping'
+  | 'activity';
 const TABS: Tab[] = [
   'ledger',
   'collections',
+  'customers',
   'insights',
   'approvals',
   'digest',
+  'shop',
   'discrepancies',
   'mapping',
   'activity',
@@ -37,13 +60,22 @@ export function App() {
   const dark = useDark();
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [host, setHost] = useState<HostInfo | null>(null);
   const [wantSetup, setWantSetup] = useState(() => window.location.hash === '#setup');
+  const [wantPractice, setWantPractice] = useState(() => window.location.hash === '#practice');
   useEffect(() => {
     api.setup
       .status()
       .then(setStatus)
       .catch((e) => setFailed((e as Error).message));
-    const on = () => setWantSetup(window.location.hash === '#setup');
+    api
+      .host()
+      .then(setHost)
+      .catch(() => setHost({ mode: 'single', workspaces: [] }));
+    const on = () => {
+      setWantSetup(window.location.hash === '#setup');
+      setWantPractice(window.location.hash === '#practice');
+    };
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
@@ -54,7 +86,7 @@ export function App() {
         <p>{failed}</p>
       </div>
     );
-  if (!status) return <div className="empty">Loading…</div>;
+  if (!status || !host) return <div className="empty">Loading…</div>;
   if (!status.configured) return <Setup status={status} dark={dark} />;
   if (wantSetup && status.canSetup)
     return (
@@ -67,10 +99,26 @@ export function App() {
         }}
       />
     );
-  return <Console dark={dark} canSetup={status.canSetup} />;
+  // A bookkeeper's practice has no single business at the root: show every client.
+  if ((host.mode === 'practice' && !BASE) || wantPractice)
+    return (
+      <Practice
+        dark={dark}
+        host={host}
+        onBack={
+          host.mode === 'practice' && !BASE
+            ? undefined
+            : () => {
+                window.location.hash = '';
+                setWantPractice(false);
+              }
+        }
+      />
+    );
+  return <Console dark={dark} canSetup={status.canSetup} host={host} />;
 }
 
-function Console({ dark, canSetup }: { dark: boolean; canSetup: boolean }) {
+function Console({ dark, canSetup, host }: { dark: boolean; canSetup: boolean; host: HostInfo }) {
   const [config, setConfig] = useState<Config | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [tab, setTabState] = useState<Tab>(tabFromHash);
@@ -175,35 +223,49 @@ function Console({ dark, canSetup }: { dark: boolean; canSetup: boolean }) {
         <span className="muted hide-sm" style={{ fontSize: 12 }}>
           Synced {ago(s?.lastSyncAt)} · webhook {ago(s?.lastWebhookAt)}
         </span>
+        {host.workspaces.length > 1 && (
+          <select
+            className="search client-switch"
+            aria-label="Switch client"
+            value={
+              host.workspaces.find((w) => (BASE ? w.consoleUrl === `${BASE}/` : w.default))?.consoleUrl ?? ''
+            }
+            onChange={(e) => {
+              window.location.href = e.target.value === '#practice' ? '/#practice' : e.target.value;
+            }}
+          >
+            {host.workspaces.map((w) => (
+              <option key={w.id} value={w.consoleUrl}>
+                {w.business}
+              </option>
+            ))}
+            <option value="#practice">All clients…</option>
+          </select>
+        )}
         {config.demo && !config.demo.custom && (
           <a className="btn sm" href={config.demo.legacyAppPath} target="_blank" rel="noreferrer">
             Legacy app ↗
           </a>
         )}
         {canSetup && (
-          <a className="btn sm" href="#setup">
-            {config.demo ? 'Try your own data' : 'Setup'}
+          <a className="btn sm" href="/#setup">
+            {config.demo ? 'Try your own data' : host.mode === 'practice' ? 'Add a client' : 'Setup'}
           </a>
         )}
-        {config.demo?.mockPath && (
+        {config.demo?.mockPath && !config.demo.custom && (
           <button
             className="btn sm"
             onClick={async () => {
               if (
-                !confirm(
-                  config.demo?.custom
-                    ? 'Go back to the Fernhill demo? Your uploaded workspace stays on the server but is no longer shown.'
-                    : 'Reset the demo? This reseeds Fernhill and clears PayPal mock data.',
-                )
+                !confirm('Reset the demo? This reseeds Fernhill and Brightside and clears PayPal mock data.')
               )
                 return;
               await api.resetDemo();
-              if (config.demo?.custom) return window.location.reload();
               toast('Demo reset');
               refresh();
             }}
           >
-            {config.demo.custom ? 'Back to Fernhill' : 'Reset demo'}
+            Reset demo
           </button>
         )}
         <button className="btn sm" onClick={runReconcile} disabled={!!busy}>
@@ -273,9 +335,11 @@ function Console({ dark, canSetup }: { dark: boolean; canSetup: boolean }) {
             [
               ['ledger', 'Ledger', null],
               ['collections', 'Collections', null],
+              ['customers', 'Customers', null],
               ['insights', 'Insights', null],
               ['approvals', 'Approvals', (s?.pendingActions ?? 0) + (s?.scheduledActions ?? 0)],
               ['digest', 'Digest', null],
+              ['shop', 'Shop', null],
               ['discrepancies', 'Discrepancies', s?.discrepancies],
               ['mapping', 'Mapping', null],
               ['activity', 'Webhooks', null],
@@ -331,6 +395,17 @@ function Console({ dark, canSetup }: { dark: boolean; canSetup: boolean }) {
         )}
         {tab === 'insights' && <Insights dark={dark} config={config} />}
         {tab === 'digest' && <Digest config={config} toast={toast} />}
+        {tab === 'customers' && (
+          <Customers
+            dark={dark}
+            config={config}
+            toast={(m) => {
+              toast(m);
+              refresh();
+            }}
+          />
+        )}
+        {tab === 'shop' && <Shop dark={dark} config={config} toast={toast} />}
         {tab === 'mapping' && <Mapping dark={dark} toast={toast} />}
         {tab === 'activity' && <Activity dark={dark} />}
 

@@ -2,8 +2,9 @@
  * mock-paypal: an in-memory stand-in for the PayPal REST endpoints paypal-retrofit uses, so the project
  * can be developed, tested and demoed without a PayPal account. It is NOT PayPal and does not try to be
  * complete. Behaviour follows the public API reference closely enough for retrofit's flows:
- * invoices (create/send/remind/cancel/pay/record payment/refund), catalog products, plans, subscriptions,
- * webhooks with verifiable signatures, disputes and transaction search.
+ * invoices (create/send/remind/cancel/pay/record payment/refund, invoice discounts), Orders v2
+ * (create/approve/capture), catalog products, plans, subscriptions, webhooks with verifiable signatures,
+ * disputes and transaction search.
  *
  * Buyer-facing pages (/mock/...) let a person "pay" an invoice or approve a subscription in a browser,
  * which fires the same webhook events PayPal would.
@@ -36,6 +37,7 @@ interface State {
   subscriptions: Record<string, any>;
   webhooks: Record<string, Webhook>;
   disputes: Record<string, any>;
+  orders: Record<string, any>;
   transactions: any[];
   idempotency: Record<string, { status: number; body: unknown }>;
   deliveries: Array<{ at: string; event: string; url: string; status: number | string }>;
@@ -48,6 +50,7 @@ const empty = (): State => ({
   subscriptions: {},
   webhooks: {},
   disputes: {},
+  orders: {},
   transactions: [],
   idempotency: {},
   deliveries: [],
@@ -179,7 +182,7 @@ export function createMockPayPal(opts: MockOptions) {
   });
 
   // ---------------------------------------------------------------- invoicing
-  const invTotal = (inv: any) => {
+  const itemTotal = (inv: any) => {
     const items: any[] = inv.items ?? [];
     return (
       Math.round(
@@ -187,6 +190,15 @@ export function createMockPayPal(opts: MockOptions) {
       ) / 100
     );
   };
+  /** Invoice-level discount (percent or amount), as PayPal applies it. */
+  const discountOf = (inv: any) => {
+    const d = inv.amount?.breakdown?.discount?.invoice_discount;
+    if (!d) return 0;
+    const items = itemTotal(inv);
+    const v = d.percent !== undefined ? (items * Number(d.percent)) / 100 : Number(d.amount?.value ?? 0);
+    return Math.round(v * 100) / 100;
+  };
+  const invTotal = (inv: any) => Math.round((itemTotal(inv) - discountOf(inv)) * 100) / 100;
   const decorate = (inv: any) => {
     const c = inv.detail?.currency_code ?? 'USD';
     const total = invTotal(inv);
@@ -198,7 +210,20 @@ export function createMockPayPal(opts: MockOptions) {
       (s: number, t: any) => s + Number(t.amount?.value ?? 0),
       0,
     );
-    inv.amount = { ...money(total, c), breakdown: { item_total: money(total, c) } };
+    const discount = inv.amount?.breakdown?.discount;
+    inv.amount = {
+      ...money(total, c),
+      breakdown: {
+        item_total: money(itemTotal(inv), c),
+        ...(discount?.invoice_discount
+          ? {
+              discount: {
+                invoice_discount: { ...discount.invoice_discount, amount: money(discountOf(inv), c) },
+              },
+            }
+          : {}),
+      },
+    };
     inv.due_amount = money(Math.max(0, total - paid), c);
     if (paid > 0) inv.payments.paid_amount = money(paid, c);
     if (refunded > 0) inv.refunds.refund_amount = money(refunded, c);
@@ -298,6 +323,7 @@ export function createMockPayPal(opts: MockOptions) {
     const b = req.body ?? {};
     Object.assign(inv, {
       items: b.items ?? inv.items,
+      amount: b.amount ?? inv.amount,
       primary_recipients: b.primary_recipients ?? inv.primary_recipients,
       configuration: b.configuration ?? inv.configuration,
       detail: {
@@ -750,6 +776,182 @@ ${inv.payments?.paid_amount ? `<p class="muted">Paid so far: ${esc(inv.payments.
     return inv;
   }
 
+  // ---------------------------------------------------------------- Orders v2
+  const orderLinks = (o: any) => [
+    { href: `${base}/v2/checkout/orders/${o.id}`, rel: 'self', method: 'GET' },
+    ...(o.status === 'CREATED' || o.status === 'PAYER_ACTION_REQUIRED'
+      ? [{ href: `${base}/mock/checkout/${o.id}`, rel: 'payer-action', method: 'GET' }]
+      : []),
+    ...(o.status === 'APPROVED'
+      ? [{ href: `${base}/v2/checkout/orders/${o.id}/capture`, rel: 'capture', method: 'POST' }]
+      : []),
+  ];
+  const orderView = (o: any) => ({ ...o, links: orderLinks(o) });
+
+  app.post('/v2/checkout/orders', auth, (req, res) =>
+    idem(req, res, () => {
+      const b = req.body ?? {};
+      const pu = b.purchase_units?.[0];
+      if (b.intent !== 'CAPTURE' || !pu?.amount?.value)
+        return {
+          status: 422,
+          body: {
+            name: 'UNPROCESSABLE_ENTITY',
+            details: [{ issue: 'MISSING_REQUIRED_PARAMETER', description: 'intent and amount are required' }],
+          },
+        };
+      const items = (pu.items ?? []).reduce(
+        (s: number, i: any) => s + Number(i.quantity ?? 1) * Number(i.unit_amount?.value ?? 0),
+        0,
+      );
+      if (pu.items?.length && Math.abs(items - Number(pu.amount.value)) > 0.005)
+        return {
+          status: 422,
+          body: {
+            name: 'UNPROCESSABLE_ENTITY',
+            details: [{ issue: 'ITEM_TOTAL_MISMATCH', description: 'Items do not add up to the amount' }],
+          },
+        };
+      const id = crypto.randomBytes(8).toString('hex').toUpperCase().slice(0, 17);
+      const order = {
+        id,
+        intent: 'CAPTURE',
+        status: 'PAYER_ACTION_REQUIRED',
+        create_time: nowIso(),
+        purchase_units: b.purchase_units,
+        payment_source: b.payment_source,
+      };
+      state.orders[id] = order;
+      log(`created order ${id} (${pu.amount.value} ${pu.amount.currency_code})`);
+      return { status: 201, body: orderView(order) };
+    }),
+  );
+  app.get('/v2/checkout/orders/:id', auth, (req, res) => {
+    const o = state.orders[req.params.id!];
+    if (!o)
+      return fail(
+        res,
+        404,
+        'RESOURCE_NOT_FOUND',
+        'The specified resource does not exist.',
+        'INVALID_RESOURCE_ID',
+      );
+    res.json(orderView(o));
+  });
+  app.post('/v2/checkout/orders/:id/capture', auth, async (req, res) => {
+    const o = state.orders[req.params.id!];
+    if (!o)
+      return fail(
+        res,
+        404,
+        'RESOURCE_NOT_FOUND',
+        'The specified resource does not exist.',
+        'INVALID_RESOURCE_ID',
+      );
+    const key = req.header('paypal-request-id');
+    if (o.status === 'COMPLETED' && key && o.captureKey === key) return res.status(201).json(orderView(o));
+    if (o.status === 'COMPLETED')
+      return fail(res, 422, 'UNPROCESSABLE_ENTITY', 'Order already captured', 'ORDER_ALREADY_CAPTURED');
+    if (o.status !== 'APPROVED')
+      return fail(
+        res,
+        422,
+        'UNPROCESSABLE_ENTITY',
+        'The buyer has not approved the order',
+        'ORDER_NOT_APPROVED',
+      );
+    const pu = o.purchase_units[0];
+    const amount = Number(pu.amount.value);
+    const c = pu.amount.currency_code;
+    const fee = Math.round((amount * 0.0349 + 0.49) * 100) / 100;
+    const capture = {
+      id: crypto.randomBytes(8).toString('hex').toUpperCase(),
+      status: 'COMPLETED',
+      create_time: nowIso(),
+      amount: money(amount, c),
+      custom_id: pu.custom_id,
+      seller_receivable_breakdown: {
+        gross_amount: money(amount, c),
+        paypal_fee: money(fee, c),
+        net_amount: money(amount - fee, c),
+      },
+      supplementary_data: { related_ids: { order_id: o.id } },
+    };
+    pu.payments = { captures: [capture] };
+    o.status = 'COMPLETED';
+    o.captureKey = key;
+    state.transactions.push({
+      transaction_info: {
+        transaction_id: capture.id,
+        transaction_event_code: 'T0006',
+        transaction_initiation_date: nowIso(),
+        transaction_amount: money(amount, c),
+        fee_amount: money(-fee, c),
+        transaction_status: 'S',
+        custom_field: pu.custom_id,
+      },
+    });
+    save();
+    log(`order ${o.id} captured (${amount})`);
+    res.status(201).json(orderView(o));
+    void emit('PAYMENT.CAPTURE.COMPLETED', capture, `Payment completed for ${amount}`);
+    void emit('CHECKOUT.ORDER.COMPLETED', orderView(o), `Order ${o.id} completed`);
+  });
+
+  /** Buyer approves an order (what the PayPal checkout window does). */
+  async function approveOrder(id: string) {
+    const o = state.orders[id];
+    if (!o || !['CREATED', 'PAYER_ACTION_REQUIRED'].includes(o.status)) return null;
+    o.status = 'APPROVED';
+    o.payer = {
+      payer_id: 'MOCKBUYER',
+      email_address: 'buyer@example.com',
+      name: { given_name: 'Test', surname: 'Buyer' },
+    };
+    save();
+    log(`order ${id} approved by the buyer`);
+    await emit('CHECKOUT.ORDER.APPROVED', orderView(o), `Order ${id} approved`);
+    return o;
+  }
+
+  app.get('/mock/checkout/:id', (req, res) => {
+    const o = state.orders[req.params.id!];
+    if (!o) return res.status(404).send(page('Not found', '<p>No such order.</p>'));
+    const pu = o.purchase_units[0];
+    const ctx = o.payment_source?.paypal?.experience_context ?? {};
+    const rows = (pu.items ?? [])
+      .map(
+        (i: any) =>
+          `<tr><td>${esc(i.name)} × ${esc(i.quantity)}</td><td>${esc(i.unit_amount.value)}</td></tr>`,
+      )
+      .join('');
+    const open = ['CREATED', 'PAYER_ACTION_REQUIRED'].includes(o.status);
+    res.send(
+      page(
+        `Pay ${esc(ctx.brand_name ?? 'merchant')}`,
+        `<h2>${esc(ctx.brand_name ?? 'Merchant')}</h2><p class="muted">${esc(pu.description ?? '')}</p>
+<table>${rows}<tr><td><b>Total</b></td><td><b>${esc(pu.amount.value)} ${esc(pu.amount.currency_code)}</b></td></tr></table>
+${open ? `<form method="post" action="${esc(req.baseUrl)}/mock/checkout/${esc(o.id)}/approve"><button>Pay ${esc(pu.amount.value)} ${esc(pu.amount.currency_code)} with PayPal (test)</button></form>${ctx.cancel_url ? `<p><a href="${esc(ctx.cancel_url)}">Cancel and return</a></p>` : ''}` : `<p class="ok">${esc(o.status)}</p>`}`,
+      ),
+    );
+  });
+  app.post('/mock/checkout/:id/approve', async (req, res) => {
+    const o = await approveOrder(req.params.id!);
+    const ctx = state.orders[req.params.id!]?.payment_source?.paypal?.experience_context ?? {};
+    if (o && ctx.return_url) {
+      const u = new URL(ctx.return_url);
+      u.searchParams.set('token', o.id);
+      u.searchParams.set('PayerID', 'MOCKBUYER');
+      return res.redirect(303, u.toString());
+    }
+    res.redirect(303, `${req.baseUrl}/mock/checkout/${req.params.id}`);
+  });
+  app.post('/mock/api/orders/:id/approve', async (req, res) => {
+    const o = await approveOrder(req.params.id!);
+    if (!o) return res.status(400).json({ error: 'Order cannot be approved' });
+    res.json(orderView(o));
+  });
+
   app.post('/mock/invoice/:id/pay', async (req, res) => {
     const inv = await payInvoice(req.params.id, req.query.amount ? Number(req.query.amount) : undefined);
     res.redirect(303, `${req.baseUrl}/mock/invoice/${req.params.id}${inv ? '?paid=1' : ''}`);
@@ -878,5 +1080,5 @@ ${s.status === 'APPROVAL_PENDING' ? `<form method="post" action="${esc(req.baseU
     state = empty();
     save();
   };
-  return { app, state: () => state, payInvoice, approveSubscription, reset };
+  return { app, state: () => state, payInvoice, approveSubscription, approveOrder, reset };
 }

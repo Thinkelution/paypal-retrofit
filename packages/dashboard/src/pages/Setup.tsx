@@ -146,8 +146,8 @@ export function Setup({
           : 'Live. Opening the console…',
       );
       setTimeout(() => {
-        window.location.hash = '';
-        window.location.reload();
+        // The new business may be a second client at /c/<id>/ (demo and multi-client mode).
+        window.location.href = r.consoleUrl || '/';
       }, 900);
     });
 

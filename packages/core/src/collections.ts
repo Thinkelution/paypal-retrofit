@@ -15,6 +15,7 @@ import type { ActionRecord } from './types.ts';
 import type { Retrofit } from './engine.ts';
 import { loadInvoices } from './entities.ts';
 import { invoiceRisks, type InvoiceRisk } from './insights.ts';
+import { expectedTotal, runTerms } from './terms.ts';
 import { addDaysIso, daysBetween, round2, splitName, toMoney, todayIso } from './util.ts';
 
 export type CollectionDecision = 'remind' | 'wait' | 'hold' | 'plan' | 'escalate';
@@ -75,7 +76,7 @@ export async function planCollections(rf: Retrofit, today = todayIso()): Promise
     const link = rf.state.getLink('invoice', inv.pk);
     if (!link || !OPEN_FOR_REMINDERS.includes(link.paypalStatus ?? '')) continue;
     const paid = link.paypalPaid ?? 0;
-    const amountDue = round2(inv.total - paid);
+    const amountDue = round2(expectedTotal(rf, inv.pk, inv.total) - paid);
     if (amountDue <= 0) continue;
     const daysOverdue = inv.due ? Math.max(0, daysBetween(inv.due, today)) : 0;
     const history = rf.state.actionsFor('send_reminder', 'invoice', inv.pk);
@@ -153,8 +154,36 @@ export async function planCollections(rf: Retrofit, today = todayIso()): Promise
       continue;
     }
 
-    const planNote = snippet(notes, cfg.planKeywords);
+    // What the customer told us in the portal outranks notes in the legacy system.
+    const requests = rf.state.listRequests({ status: 'open', legacyPk: inv.pk });
     const offers = rf.state.actionsFor('offer_payment_plan', 'invoice', inv.pk);
+    const question = requests.find((r) => r.kind === 'question');
+    if (question) {
+      push(
+        'hold',
+        `Customer asked in the portal: “${(question.detail ?? '').slice(0, 80)}”. Reply before chasing`,
+      );
+      continue;
+    }
+    const promised = requests.find((r) => r.kind === 'promise' && r.until && r.until >= today);
+    if (promised) {
+      push('hold', `Customer promised in the portal to pay by ${promised.until}`, {
+        nextReminderOn: addDaysIso(promised.until!, 1),
+      });
+      continue;
+    }
+    const asked = requests.find((r) => r.kind === 'plan');
+    if (asked) {
+      if (offers.some((a) => a.status === 'pending' || a.status === 'scheduled'))
+        push(
+          'wait',
+          `The ${asked.installments ?? 2}-part plan the customer asked for is waiting for your approval`,
+        );
+      else push('plan', `Customer asked in the portal to pay in ${asked.installments ?? 2} parts`);
+      continue;
+    }
+
+    const planNote = snippet(notes, cfg.planKeywords);
     if (planNote && offers.some((a) => a.status === 'pending' || a.status === 'scheduled')) {
       push('wait', 'A payment-plan offer is waiting for approval');
       continue;
@@ -251,6 +280,8 @@ export function reminderTemplate(item: CollectionItem, business: string, currenc
 export interface CollectionsRun {
   items: CollectionItem[];
   proposed: Array<{ item: CollectionItem; action: ActionRecord }>;
+  /** Late fees and discount expiries proposed under the owner's payment terms. */
+  terms: ActionRecord[];
   writer: 'template' | 'ai';
 }
 
@@ -263,7 +294,7 @@ export async function runCollections(
   opts: {
     today?: string;
     only?: string[];
-    origin?: 'cli' | 'agent' | 'dashboard' | 'sync';
+    origin?: 'cli' | 'agent' | 'dashboard' | 'sync' | 'portal';
     writer?: (items: CollectionItem[]) => Promise<Map<string, ReminderText>>;
   } = {},
 ): Promise<CollectionsRun> {
@@ -304,17 +335,25 @@ export async function runCollections(
       });
       proposed.push({ item, action });
     } else {
+      const asked = rf.state
+        .listRequests({ status: 'open', legacyPk: item.legacyPk })
+        .find((r) => r.kind === 'plan');
       const action = await rf.propose({
         origin: opts.origin ?? 'cli',
         kind: 'offer_payment_plan',
         target,
-        payload: { installments: item.amountDue >= 1000 ? 3 : 2, intervalDays: 14, amount: item.amountDue },
+        payload: {
+          installments: asked?.installments ?? (item.amountDue >= 1000 ? 3 : 2),
+          intervalDays: 14,
+          amount: item.amountDue,
+        },
         reason: `Collections: ${item.reason}`,
       });
       proposed.push({ item, action });
     }
   }
+  const terms = opts.only ? [] : await runTerms(rf, { today: opts.today, origin: opts.origin });
   rf.state.setMeta('lastCollectionsAt', new Date().toISOString());
-  rf.emit('collections', { proposed: proposed.length });
-  return { items: await planCollections(rf, opts.today), proposed, writer };
+  rf.emit('collections', { proposed: proposed.length + terms.length });
+  return { items: await planCollections(rf, opts.today), proposed, terms, writer };
 }

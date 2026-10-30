@@ -34,13 +34,26 @@ import {
   type Retrofit,
   type SchemaDescription,
 } from '@paypal-retrofit/core';
-import { mcpHttpHandler } from '@paypal-retrofit/mcp';
+import { mcpHttpHandler, shopMcpHttpHandler } from '@paypal-retrofit/mcp';
+import {
+  buildStatement,
+  listCustomers,
+  loadCatalog,
+  planTerms,
+  renderStatement,
+  runTerms,
+  signPortalToken,
+  Commerce,
+  PaymentTerms,
+} from '@paypal-retrofit/core';
+import nodemailer from 'nodemailer';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { approvalPage, type ApprovalPageInput } from './approval-page.ts';
+import { portalRouter, shopRouter } from './portal.ts';
 import { digestChannels, digestSchedule, prepareDigest, runScheduledDigest, sendDigest } from './digest.ts';
 
 export * from './digest.ts';
@@ -54,6 +67,8 @@ export interface ServerOptions {
   watch?: boolean;
   /** Reconcile every N seconds (0 = never). */
   reconcileEverySeconds?: number;
+  /** Public base URL of this workspace when it is mounted under a path (multi-client mode), e.g. https://host/c/acme. */
+  baseUrl?: string;
   /** Extra routers to mount (the embedded demo uses this for mock PayPal and the Fernhill app). */
   mounts?: Array<{ path: string; router: express.RequestHandler; public?: boolean }>;
   /** Called by POST /api/demo/reset when the embedded demo is running. */
@@ -76,6 +91,35 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
   const ops = new OpsAgent(rf);
   let schemaCache: SchemaDescription | null = null;
   const timers: NodeJS.Timeout[] = [];
+
+  // Where this workspace is reachable: configured public URL, the host's mount, or the last request's origin.
+  let seenBase: string | undefined;
+  app.use((req, res, next) => {
+    // req.baseUrl here is where the host mounted this workspace ('' or /c/<client>).
+    res.locals.base = seenBase = `${req.protocol}://${req.get('host')}${req.baseUrl}`;
+    next();
+  });
+  const baseFor = (req?: Request) =>
+    (
+      publicBaseUrl(rf.config) ??
+      opts.baseUrl ??
+      (req?.res?.locals.base as string | undefined) ??
+      seenBase ??
+      ''
+    ).replace(/\/$/, '');
+  rf.portalUrl = (customerPk) => {
+    const b = baseFor();
+    return b ? `${b}/p/${signPortalToken(actionLinkSecret(rf), customerPk)}` : undefined;
+  };
+  if (rf.config.env.smtpUrl) {
+    const transport = nodemailer.createTransport(rf.config.env.smtpUrl);
+    const from =
+      rf.config.env.digestFrom ?? rf.config.business.email ?? 'paypal-retrofit <no-reply@localhost>';
+    rf.mailer = async (m) => {
+      const info = await transport.sendMail({ from, ...m });
+      return { id: String(info.messageId) };
+    };
+  }
 
   // ---- public routes (no auth): PayPal must reach the webhook; Render probes health
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
@@ -146,6 +190,17 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
     }
   });
   app.use('/a', approval);
+
+  // ---- customer-facing: portal (signed link per customer), shop, PayPal return URLs, buyer MCP
+  const publicCtx = { base: (req: Request) => baseFor(req) };
+  app.use('/p', portalRouter(rf, publicCtx));
+  app.use(shopRouter(rf, publicCtx));
+  app.post('/mcp/shop', express.json({ limit: '256kb' }), (req, res, next) => {
+    void shopMcpHttpHandler(
+      () => rf,
+      () => baseFor(req),
+    )(req, res).catch(next);
+  });
 
   // ---- everything else behind optional basic auth
   const auth = basicAuth();
@@ -388,6 +443,125 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
         `attachment; filename="paypal-journal-${month ?? 'all'}-${format}.csv"`,
       );
       res.send(csv);
+    }),
+  );
+
+  // ---- customers: balances, statements, portal links, requests
+  api.get(
+    '/customers',
+    wrap(async (_req, res) =>
+      res.json(
+        (await listCustomers(rf)).map((c) => ({
+          ...c,
+          portalUrl: rf.portalUrl?.(c.pk) ?? null,
+          lastStatement: rf.state.listOutbox(500).find((o) => o.customerPk === c.pk)?.createdAt ?? null,
+        })),
+      ),
+    ),
+  );
+  api.get(
+    '/customers/:pk/statement',
+    wrap(async (req, res) => {
+      const s = await buildStatement(rf, req.params.pk!);
+      const r = renderStatement(s, { portalUrl: rf.portalUrl?.(req.params.pk!) });
+      res.json({ statement: s, subject: r.subject, html: r.html });
+    }),
+  );
+  api.post(
+    '/customers/:pk/statement/send',
+    wrap(async (req, res) => {
+      const s = await buildStatement(rf, req.params.pk!);
+      res.json(
+        await rf.propose({
+          origin: 'dashboard',
+          kind: 'send_statement',
+          target: { entity: 'customer', legacyPk: s.customer.pk, label: s.customer.name },
+          payload: { balance: s.totals.balance },
+          reason: `Statement for ${s.customer.name}: ${s.totals.balance.toFixed(2)} ${s.currency} open`,
+        }),
+      );
+    }),
+  );
+  api.post(
+    '/statements/run',
+    wrap(async (_req, res) => {
+      const out = [];
+      for (const c of (await listCustomers(rf)).filter((x) => x.balance > 0))
+        out.push(
+          await rf.propose({
+            origin: 'dashboard',
+            kind: 'send_statement',
+            target: { entity: 'customer', legacyPk: c.pk, label: c.name },
+            payload: { balance: c.balance },
+            reason: `Monthly statement for ${c.name}: ${c.balance.toFixed(2)} ${rf.mapping.currency} open`,
+          }),
+        );
+      res.json(out);
+    }),
+  );
+  api.get('/requests', (req, res) =>
+    res.json(rf.state.listRequests(req.query.all === '1' ? {} : { status: 'open' })),
+  );
+  api.post('/requests/:id/resolve', (req, res) => {
+    rf.state.resolveRequest(Number(req.params.id));
+    rf.emit('request', { id: req.params.id });
+    res.json({ ok: true });
+  });
+  api.get('/outbox', (_req, res) => res.json(rf.state.listOutbox(100)));
+  api.get('/outbox/:id/html', (req, res) => {
+    const html = rf.state.getOutboxHtml(Number(req.params.id));
+    if (!html) return res.status(404).end();
+    res.type('html').send(html);
+  });
+
+  // ---- payment terms (late fees, early-payment discounts)
+  api.get(
+    '/terms',
+    wrap(async (_req, res) =>
+      res.json({ terms: rf.mapping.terms, applied: rf.state.listAdjustments(), due: await planTerms(rf) }),
+    ),
+  );
+  api.put(
+    '/terms',
+    wrap(async (req, res) => {
+      const parsed = PaymentTerms.safeParse(req.body ?? {});
+      if (!parsed.success)
+        return res.status(422).json({ error: parsed.error.issues.map((i) => i.message).join('; ') });
+      rf.mapping = { ...rf.mapping, terms: parsed.data };
+      saveMapping(rf.config, rf.mapping);
+      rf.emit('mapping', {});
+      res.json(rf.mapping.terms);
+    }),
+  );
+  api.post(
+    '/terms/run',
+    wrap(async (_req, res) => res.json(await runTerms(rf, { origin: 'dashboard' }))),
+  );
+
+  // ---- shop: catalogue, orders, buyer-agent access
+  api.get(
+    '/shop',
+    wrap(async (req, res) =>
+      res.json({
+        settings: rf.mapping.commerce,
+        hasCatalog: Boolean(rf.mapping.entities.product?.fields.price),
+        catalog: await loadCatalog(rf),
+        orders: rf.state.listOrders(200),
+        shopUrl: `${baseFor(req)}/shop`,
+        mcpUrl: `${baseFor(req)}/mcp/shop`,
+      }),
+    ),
+  );
+  api.put(
+    '/shop',
+    wrap(async (req, res) => {
+      const parsed = Commerce.safeParse({ ...rf.mapping.commerce, ...(req.body ?? {}) });
+      if (!parsed.success)
+        return res.status(422).json({ error: parsed.error.issues.map((i) => i.message).join('; ') });
+      rf.mapping = { ...rf.mapping, commerce: parsed.data };
+      saveMapping(rf.config, rf.mapping);
+      rf.emit('mapping', {});
+      res.json(rf.mapping.commerce);
     }),
   );
 

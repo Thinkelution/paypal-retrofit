@@ -9,6 +9,8 @@ import {
   type LegacySubscription,
 } from './entities.ts';
 import { type RetrofitMapping } from './mapping/schema.ts';
+import { buildStatement, renderStatement } from './statements.ts';
+import { earlyDiscountFor } from './terms.ts';
 import { decidePolicy, describeLocal, type PolicyDecision } from './policy.ts';
 import {
   CANCELLED_STATUSES,
@@ -66,6 +68,10 @@ export class Retrofit {
   mapping: RetrofitMapping;
   readonly log = new Logger('engine');
   private listeners = new Set<(e: { type: string; data?: unknown }) => void>();
+  /** Sends email to customers (statements). Set by the server when SMTP is configured; otherwise messages stay in the outbox. */
+  mailer?: (m: { to: string; subject: string; html: string; text: string }) => Promise<{ id: string }>;
+  /** Builds the customer-portal link for a customer, when the server knows its public URL. */
+  portalUrl?: (customerPk: string) => string | undefined;
 
   constructor(
     readonly config: ResolvedConfig,
@@ -452,8 +458,18 @@ export class Retrofit {
         await this.applySubscriptionStatus(link, s.status);
         return { cancelled: link.paypalId, status: s.status };
       }
-      case 'offer_payment_plan':
-        return this.offerPaymentPlan(pk, a.payload);
+      case 'offer_payment_plan': {
+        const r = await this.offerPaymentPlan(pk, a.payload);
+        for (const req of this.state.listRequests({ status: 'open', legacyPk: pk }))
+          if (req.kind === 'plan') this.state.resolveRequest(req.id);
+        return r;
+      }
+      case 'apply_late_fee':
+        return this.applyLateFee(pk, Number(a.payload.amount ?? 0));
+      case 'expire_discount':
+        return this.expireDiscount(pk);
+      case 'send_statement':
+        return this.sendStatement(pk);
       case 'accept_dispute': {
         const disputeId = String(a.payload.disputeId ?? '');
         if (!disputeId) throw new Error('disputeId is required');
@@ -560,7 +576,7 @@ export class Retrofit {
     if (existing) return { skipped: true, reason: 'already linked', paypalId: existing.paypalId };
     const problem = this.invoiceProblem(inv);
     if (problem) throw new Error(problem);
-    const draft = invoiceDraft(inv, this.payloadContext);
+    const draft = this.withTerms(inv, invoiceDraft(inv, this.payloadContext), true);
     let created: PayPalInvoice;
     try {
       created = await this.paypal.createInvoice(draft, `retrofit-inv-${inv.pk}-${inv.hash}`);
@@ -598,6 +614,146 @@ export class Retrofit {
     return { paypalId: created.id, sent: false, status: link.paypalStatus };
   }
 
+  /**
+   * Adds the owner's payment terms to an invoice payload: late-fee lines already applied, and the
+   * early-payment discount (on creation, if its window is open; on updates, while it is still in force).
+   */
+  private withTerms<T extends { items: any[]; detail: any }>(inv: LegacyInvoice, draft: T, creating = false) {
+    const adj = this.state.listAdjustments(inv.pk);
+    const fees = adj.filter((a) => a.kind === 'late_fee');
+    let discount = adj.find((a) => a.kind === 'early_discount');
+    const out: any = {
+      ...draft,
+      items: [
+        ...draft.items,
+        ...fees.map((f) => ({
+          name: f.detail ?? this.mapping.terms.lateFee?.label ?? 'Late payment fee',
+          quantity: '1',
+          unit_amount: { currency_code: this.mapping.currency, value: toMoney(f.amount) },
+          unit_of_measure: 'AMOUNT',
+        })),
+      ],
+    };
+    if (creating && !discount) {
+      const d = earlyDiscountFor(this.mapping.terms, inv.total, inv.issued);
+      if (d) {
+        this.state.addAdjustment({
+          legacyPk: inv.pk,
+          kind: 'early_discount',
+          amount: -d.amount,
+          detail: `${d.percent}% early-payment discount`,
+          until: d.until,
+        });
+        discount = this.state.listAdjustments(inv.pk).find((a) => a.kind === 'early_discount');
+      }
+    }
+    if (discount) {
+      // A fixed amount, not a percent: a late fee added later must not be discounted too.
+      out.amount = {
+        breakdown: {
+          discount: {
+            invoice_discount: {
+              amount: { currency_code: this.mapping.currency, value: toMoney(-discount.amount) },
+            },
+          },
+        },
+      };
+      out.detail = {
+        ...draft.detail,
+        note: [
+          draft.detail.note,
+          `Pay by ${discount.until} and ${toMoney(-discount.amount)} ${this.mapping.currency} is taken off (already applied). After that date the full amount applies.`,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .slice(0, 4000),
+      };
+    }
+    return out as T;
+  }
+
+  private async applyLateFee(pk: string, amount: number) {
+    if (this.state.listAdjustments(pk).some((a) => a.kind === 'late_fee'))
+      return { skipped: true, reason: 'A late fee is already on this invoice' };
+    const link = this.requireLink('invoice', pk);
+    const current = await this.paypal.getInvoice(link.paypalId);
+    if (!OPEN_STATUSES.includes(current.status))
+      return { skipped: true, reason: `Invoice is ${current.status}` };
+    const label = this.mapping.terms.lateFee?.label ?? 'Late payment fee';
+    const updated = await this.paypal.updateInvoice(
+      link.paypalId,
+      {
+        ...current,
+        items: [
+          ...(current.items ?? []),
+          {
+            name: label,
+            quantity: '1',
+            unit_amount: { currency_code: this.mapping.currency, value: toMoney(amount) },
+            unit_of_measure: 'AMOUNT',
+          },
+        ],
+      },
+      true,
+    );
+    this.state.addAdjustment({ legacyPk: pk, kind: 'late_fee', amount, detail: label, until: null });
+    await this.applyInvoiceState(link, updated ?? (await this.paypal.getInvoice(link.paypalId)));
+    return { lateFee: amount, paypalId: link.paypalId };
+  }
+
+  private async expireDiscount(pk: string) {
+    const d = this.state.listAdjustments(pk).find((a) => a.kind === 'early_discount');
+    if (!d) return { skipped: true, reason: 'No discount in force' };
+    const link = this.requireLink('invoice', pk);
+    const current = await this.paypal.getInvoice(link.paypalId);
+    if (OPEN_STATUSES.includes(current.status)) {
+      const breakdown = { ...((current as any).amount?.breakdown ?? {}) };
+      delete breakdown.discount;
+      await this.paypal.updateInvoice(
+        link.paypalId,
+        {
+          ...current,
+          amount: { ...((current as any).amount ?? {}), breakdown },
+          detail: {
+            ...current.detail,
+            note: String(current.detail?.note ?? '')
+              .replace(/ ?Pay by \d{4}-\d{2}-\d{2} and [^.]+\. After that date the full amount applies\./, '')
+              .trim(),
+          },
+        },
+        true,
+      );
+    }
+    this.state.removeAdjustment(d.id);
+    await this.refreshInvoice(link.paypalId);
+    return { discountRemoved: -d.amount };
+  }
+
+  private async sendStatement(customerPk: string) {
+    const statement = await buildStatement(this, customerPk);
+    const r = renderStatement(statement, { portalUrl: this.portalUrl?.(customerPk) });
+    const to = statement.customer.email;
+    let status: 'sent' | 'outbox' = 'outbox';
+    let detail = 'No email server configured (RETROFIT_SMTP_URL); kept in the outbox';
+    if (this.mailer) {
+      const sent = await this.mailer({ to, subject: r.subject, html: r.html, text: r.text });
+      status = 'sent';
+      detail = `Emailed (${sent.id})`;
+    }
+    const id = this.state.addOutbox({
+      kind: 'statement',
+      customerPk,
+      recipient: to,
+      subject: r.subject,
+      html: r.html,
+      text: r.text,
+      status,
+      detail,
+    });
+    this.emit('outbox', { id });
+    return { outboxId: id, status, detail, balance: statement.totals.balance };
+  }
+
   private async adoptExisting(invoiceNumber: string): Promise<PayPalInvoice | null> {
     const found = await this.paypal.searchInvoices({ invoice_number: invoiceNumber });
     const match = found.items?.find((i) => i.detail?.invoice_number === invoiceNumber);
@@ -630,7 +786,7 @@ export class Retrofit {
     if (!OPEN_STATUSES.includes(current.status) || current.payments?.paid_amount) {
       return { skipped: true, reason: `PayPal invoice is ${current.status}; not updating` };
     }
-    const draft = invoiceDraft(inv, this.payloadContext);
+    const draft = this.withTerms(inv, invoiceDraft(inv, this.payloadContext));
     const updated = await this.paypal.updateInvoice(link.paypalId, {
       ...current,
       ...draft,
@@ -771,7 +927,8 @@ export class Retrofit {
   private recordInvoicePayments(link: LinkRecord, inv: PayPalInvoice) {
     const cur = inv.detail?.currency_code ?? this.mapping.currency;
     (inv.payments?.transactions ?? []).forEach((t, i) => {
-      const external = t.type === 'EXTERNAL';
+      // Portal payments are PayPal payments recorded against the invoice; everything else EXTERNAL was paid outside PayPal.
+      const external = t.type === 'EXTERNAL' && t.method !== 'PAYPAL';
       this.state.recordPayment({
         id: String(t.payment_id ?? t.transaction_id ?? `${inv.id}-p${i}`),
         entity: 'invoice',

@@ -75,6 +75,26 @@ CREATE TABLE IF NOT EXISTS payments (
   gross REAL NOT NULL, fee REAL, net REAL, currency TEXT NOT NULL, method TEXT, occurred_at TEXT NOT NULL, recorded_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS payments_at ON payments (occurred_at);
+CREATE TABLE IF NOT EXISTS adjustments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, legacy_pk TEXT NOT NULL, kind TEXT NOT NULL, amount REAL NOT NULL,
+  status TEXT NOT NULL, detail TEXT, until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS adjustments_pk ON adjustments (legacy_pk);
+CREATE TABLE IF NOT EXISTS requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, customer_pk TEXT NOT NULL, legacy_pk TEXT, kind TEXT NOT NULL,
+  detail TEXT, until TEXT, installments INTEGER, status TEXT NOT NULL, created_at TEXT NOT NULL, resolved_at TEXT
+);
+CREATE TABLE IF NOT EXISTS orders (
+  id TEXT PRIMARY KEY, paypal_order_id TEXT, channel TEXT NOT NULL, status TEXT NOT NULL, items TEXT NOT NULL,
+  invoices TEXT, total REAL NOT NULL, currency TEXT NOT NULL, buyer TEXT, approve_url TEXT, capture_id TEXT,
+  fee REAL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS orders_paypal ON orders (paypal_order_id);
+CREATE TABLE IF NOT EXISTS outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, customer_pk TEXT, recipient TEXT NOT NULL,
+  subject TEXT NOT NULL, html TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL, detail TEXT,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS digests (
   id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, trigger TEXT NOT NULL, subject TEXT NOT NULL,
   deliveries TEXT NOT NULL, html TEXT NOT NULL, text TEXT NOT NULL
@@ -97,6 +117,63 @@ export interface PlanRecord {
   status: 'active' | 'completed' | 'cancelled';
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AdjustmentRecord {
+  id: number;
+  legacyPk: string;
+  kind: 'late_fee' | 'early_discount';
+  /** Positive for fees, negative for discounts. */
+  amount: number;
+  status: 'applied' | 'removed';
+  detail: string | null;
+  /** For discounts: the last day it applies (YYYY-MM-DD). */
+  until: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerRequestRecord {
+  id: number;
+  customerPk: string;
+  legacyPk: string | null;
+  kind: 'promise' | 'plan' | 'question';
+  detail: string | null;
+  /** For promises: the date the customer promised to pay by. */
+  until: string | null;
+  installments: number | null;
+  status: 'open' | 'done';
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface OrderRecord {
+  id: string;
+  paypalOrderId: string | null;
+  channel: 'shop' | 'agent' | 'portal';
+  status: 'CREATED' | 'APPROVED' | 'COMPLETED' | 'CANCELLED' | 'FAILED';
+  items: Array<{ productId?: string; legacyPk?: string; name: string; quantity: number; unitPrice: number }>;
+  /** Portal orders: the invoices this payment covers. */
+  invoices: Array<{ legacyPk: string; number: string; amount: number }> | null;
+  total: number;
+  currency: string;
+  buyer: { name?: string; email?: string; agent?: string; customerPk?: string } | null;
+  approveUrl: string | null;
+  captureId: string | null;
+  fee: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OutboxRecord {
+  id: number;
+  kind: 'statement';
+  customerPk: string | null;
+  recipient: string;
+  subject: string;
+  status: 'sent' | 'outbox' | 'failed';
+  detail: string | null;
+  createdAt: string;
 }
 
 export interface DigestDelivery {
@@ -352,6 +429,143 @@ export class StateStore {
       .prepare(`UPDATE payments SET fee=?, net=ROUND(gross-?, 2) WHERE id=? AND fee IS NULL`)
       .run(fee, fee, id);
   }
+  // ---- payment terms
+  addAdjustment(a: Omit<AdjustmentRecord, 'id' | 'createdAt' | 'updatedAt' | 'status'>): number {
+    const r = this.db
+      .prepare(
+        `INSERT INTO adjustments (legacy_pk, kind, amount, status, detail, until, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`,
+      )
+      .run(a.legacyPk, a.kind, a.amount, 'applied', a.detail, a.until, now(), now());
+    return Number(r.lastInsertRowid);
+  }
+  listAdjustments(legacyPk?: string, onlyApplied = true): AdjustmentRecord[] {
+    const where = [legacyPk ? 'legacy_pk = @pk' : '', onlyApplied ? "status = 'applied'" : '']
+      .filter(Boolean)
+      .join(' AND ');
+    return (
+      this.db
+        .prepare(`SELECT * FROM adjustments ${where ? `WHERE ${where}` : ''} ORDER BY id`)
+        .all(legacyPk ? { pk: legacyPk } : {}) as any[]
+    ).map((r) => ({
+      id: r.id,
+      legacyPk: r.legacy_pk,
+      kind: r.kind,
+      amount: r.amount,
+      status: r.status,
+      detail: r.detail,
+      until: r.until,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  }
+  removeAdjustment(id: number) {
+    this.db.prepare(`UPDATE adjustments SET status='removed', updated_at=? WHERE id=?`).run(now(), id);
+  }
+  /** Net of applied fees and discounts on one invoice. */
+  adjustmentTotal(legacyPk: string): number {
+    const r = this.db
+      .prepare(`SELECT COALESCE(SUM(amount), 0) AS t FROM adjustments WHERE legacy_pk=? AND status='applied'`)
+      .get(legacyPk) as { t: number };
+    return Math.round(r.t * 100) / 100;
+  }
+
+  // ---- customer requests (portal)
+  addRequest(r: Omit<CustomerRequestRecord, 'id' | 'createdAt' | 'resolvedAt' | 'status'>): number {
+    const res = this.db
+      .prepare(
+        `INSERT INTO requests (customer_pk, legacy_pk, kind, detail, until, installments, status, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      )
+      .run(r.customerPk, r.legacyPk, r.kind, r.detail, r.until, r.installments, 'open', now());
+    return Number(res.lastInsertRowid);
+  }
+  listRequests(
+    opts: { status?: 'open' | 'done'; customerPk?: string; legacyPk?: string } = {},
+  ): CustomerRequestRecord[] {
+    const where: string[] = [];
+    if (opts.status) where.push('status = @status');
+    if (opts.customerPk) where.push('customer_pk = @customerPk');
+    if (opts.legacyPk) where.push('legacy_pk = @legacyPk');
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM requests ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC`,
+        )
+        .all(opts) as any[]
+    ).map((r) => ({
+      id: r.id,
+      customerPk: r.customer_pk,
+      legacyPk: r.legacy_pk,
+      kind: r.kind,
+      detail: r.detail,
+      until: r.until,
+      installments: r.installments,
+      status: r.status,
+      createdAt: r.created_at,
+      resolvedAt: r.resolved_at,
+    }));
+  }
+  resolveRequest(id: number) {
+    this.db.prepare(`UPDATE requests SET status='done', resolved_at=? WHERE id=?`).run(now(), id);
+  }
+
+  // ---- orders (shop, buyer agents, portal payments)
+  saveOrder(o: Omit<OrderRecord, 'createdAt' | 'updatedAt'> & { createdAt?: string }) {
+    this.db
+      .prepare(
+        `INSERT INTO orders (id, paypal_order_id, channel, status, items, invoices, total, currency, buyer, approve_url, capture_id, fee, created_at, updated_at)
+         VALUES (@id, @paypalOrderId, @channel, @status, @items, @invoices, @total, @currency, @buyer, @approveUrl, @captureId, @fee, @createdAt, @updatedAt)
+         ON CONFLICT(id) DO UPDATE SET paypal_order_id=excluded.paypal_order_id, status=excluded.status,
+           approve_url=excluded.approve_url, capture_id=excluded.capture_id, fee=excluded.fee, updated_at=excluded.updated_at`,
+      )
+      .run({
+        ...o,
+        items: JSON.stringify(o.items),
+        invoices: o.invoices ? JSON.stringify(o.invoices) : null,
+        buyer: o.buyer ? JSON.stringify(o.buyer) : null,
+        createdAt: o.createdAt ?? now(),
+        updatedAt: now(),
+      });
+  }
+  getOrder(id: string): OrderRecord | undefined {
+    const r = this.db.prepare(`SELECT * FROM orders WHERE id=? OR paypal_order_id=?`).get(id, id);
+    return r ? toOrder(r) : undefined;
+  }
+  listOrders(limit = 200): OrderRecord[] {
+    return this.db.prepare(`SELECT * FROM orders ORDER BY created_at DESC LIMIT ?`).all(limit).map(toOrder);
+  }
+
+  // ---- customer messages (statements)
+  addOutbox(m: Omit<OutboxRecord, 'id' | 'createdAt'> & { html: string; text: string }): number {
+    const r = this.db
+      .prepare(
+        `INSERT INTO outbox (kind, customer_pk, recipient, subject, html, text, status, detail, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(m.kind, m.customerPk, m.recipient, m.subject, m.html, m.text, m.status, m.detail, now());
+    return Number(r.lastInsertRowid);
+  }
+  listOutbox(limit = 50): OutboxRecord[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT id, kind, customer_pk, recipient, subject, status, detail, created_at FROM outbox ORDER BY id DESC LIMIT ?`,
+        )
+        .all(limit) as any[]
+    ).map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      customerPk: r.customer_pk,
+      recipient: r.recipient,
+      subject: r.subject,
+      status: r.status,
+      detail: r.detail,
+      createdAt: r.created_at,
+    }));
+  }
+  getOutboxHtml(id: number): string | undefined {
+    return (this.db.prepare(`SELECT html FROM outbox WHERE id=?`).get(id) as { html: string } | undefined)
+      ?.html;
+  }
+
   addDigest(d: {
     trigger: DigestRecord['trigger'];
     subject: string;
@@ -563,5 +777,24 @@ function toPayment(r: any): PaymentRecord {
     method: r.method,
     occurredAt: r.occurred_at,
     recordedAt: r.recorded_at,
+  };
+}
+
+function toOrder(r: any): OrderRecord {
+  return {
+    id: r.id,
+    paypalOrderId: r.paypal_order_id,
+    channel: r.channel,
+    status: r.status,
+    items: JSON.parse(r.items),
+    invoices: r.invoices ? JSON.parse(r.invoices) : null,
+    total: r.total,
+    currency: r.currency,
+    buyer: r.buyer ? JSON.parse(r.buyer) : null,
+    approveUrl: r.approve_url,
+    captureId: r.capture_id,
+    fee: r.fee,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
   };
 }

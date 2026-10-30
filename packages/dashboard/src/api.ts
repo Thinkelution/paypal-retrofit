@@ -294,8 +294,121 @@ export interface DigestPreview {
   data: { note?: string; headline: string; approvalsTotal: number };
 }
 
+export interface CustomerRow {
+  pk: string;
+  name: string;
+  email: string;
+  openInvoices: number;
+  balance: number;
+  overdue: number;
+  oldestDaysOverdue: number;
+  lastPaymentAt: string | null;
+  openRequests: number;
+  behaviour: string | null;
+  onTimeRate: number | null;
+  portalUrl: string | null;
+  lastStatement: string | null;
+}
+
+export interface CustomerRequest {
+  id: number;
+  customerPk: string;
+  legacyPk: string | null;
+  kind: 'promise' | 'plan' | 'question';
+  detail: string | null;
+  until: string | null;
+  installments: number | null;
+  status: 'open' | 'done';
+  createdAt: string;
+}
+
+export interface Terms {
+  lateFee?: { kind: 'percent' | 'flat'; amount: number; afterDays: number; label: string };
+  earlyDiscount?: { percent: number; withinDays: number };
+}
+
+export interface TermsInfo {
+  terms: Terms;
+  applied: Array<{
+    id: number;
+    legacyPk: string;
+    kind: string;
+    amount: number;
+    until: string | null;
+    detail: string | null;
+  }>;
+  due: Array<{
+    legacyPk: string;
+    number: string;
+    customer: string;
+    kind: string;
+    amount: number;
+    reason: string;
+  }>;
+}
+
+export interface Order {
+  id: string;
+  paypalOrderId: string | null;
+  channel: 'shop' | 'agent' | 'portal';
+  status: string;
+  items: Array<{ name: string; quantity: number; unitPrice: number }>;
+  invoices: Array<{ legacyPk: string; number: string; amount: number }> | null;
+  total: number;
+  currency: string;
+  buyer: { name?: string; email?: string; agent?: string; customerPk?: string } | null;
+  fee: number | null;
+  createdAt: string;
+}
+
+export interface ShopInfo {
+  settings: { enabled: boolean; maxOrderTotal: number; maxQuantity: number; description?: string };
+  hasCatalog: boolean;
+  catalog: Array<{ id: string; name: string; description: string | null; price: number; currency: string }>;
+  orders: Order[];
+  shopUrl: string;
+  mcpUrl: string;
+}
+
+export interface HostInfo {
+  mode: 'single' | 'practice' | 'demo';
+  workspaces: Array<{ id: string; business: string; consoleUrl: string; default: boolean }>;
+}
+
+export interface PracticeRow {
+  id: string;
+  business: string;
+  consoleUrl: string;
+  environment?: string;
+  currency?: string;
+  source?: string;
+  openAmount?: number;
+  overdue?: number;
+  overdueAmount?: number;
+  paidViaPayPalAmount?: number;
+  expectedNext30?: number;
+  atRisk?: number;
+  pendingActions?: number;
+  scheduledActions?: number;
+  discrepancies?: number;
+  requests?: number;
+  sales?: number;
+  attention?: number;
+  linked?: number;
+  invoices?: number;
+  lastSyncAt?: string | null;
+  lastDigestAt?: string | null;
+  error?: string;
+}
+
+/** Set when this console is one client of several, served under /c/<id> (multi-client mode and the demo). */
+export const BASE = (window.location.pathname.match(/^\/c\/[^/]+/) ?? [''])[0];
+/** Host-level APIs live at the root; everything else belongs to this workspace. */
+const HOST_API = /^\/api\/(setup|host|practice)(\/|$)/;
+export const u = (p: string) => (HOST_API.test(p) ? p : `${BASE}${p}`);
+
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
-  const r = await fetch(url, {
+  const r = await fetch(u(url), {
     method,
     headers: body === undefined ? undefined : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -343,12 +456,43 @@ export const api = {
     }>('POST', '/api/collections/run', body),
   insights: () => req<Insights>('GET', '/api/insights'),
   monthSummary: (month: string) => req<MonthSummary>('GET', `/api/month-summary?month=${month}`),
-  journalUrl: (month: string, format: string) => `/api/export/journal.csv?month=${month}&format=${format}`,
+  journalUrl: (month: string, format: string) => u(`/api/export/journal.csv?month=${month}&format=${format}`),
   digest: () => req<DigestInfo>('GET', '/api/digest'),
   digestPreview: (ai: boolean) => req<DigestPreview>('GET', `/api/digest/preview${ai ? '?ai=1' : ''}`),
   sendDigest: (ai: boolean) =>
     req<{ id: number; subject: string; deliveries: DigestDelivery[] }>('POST', '/api/digest/send', { ai }),
-  digestHtmlUrl: (id: number) => `/api/digest/${id}/html`,
+  digestHtmlUrl: (id: number) => u(`/api/digest/${id}/html`),
+  customers: () => req<CustomerRow[]>('GET', '/api/customers'),
+  statement: (pk: string) =>
+    req<{ statement: any; subject: string; html: string }>(
+      'GET',
+      `/api/customers/${encodeURIComponent(pk)}/statement`,
+    ),
+  sendStatement: (pk: string) =>
+    req<Action>('POST', `/api/customers/${encodeURIComponent(pk)}/statement/send`),
+  runStatements: () => req<Action[]>('POST', '/api/statements/run'),
+  requests: () => req<CustomerRequest[]>('GET', '/api/requests'),
+  resolveRequest: (id: number) => req('POST', `/api/requests/${id}/resolve`),
+  outbox: () =>
+    req<
+      Array<{
+        id: number;
+        recipient: string;
+        subject: string;
+        status: string;
+        detail: string | null;
+        createdAt: string;
+        customerPk: string | null;
+      }>
+    >('GET', '/api/outbox'),
+  outboxHtmlUrl: (id: number) => u(`/api/outbox/${id}/html`),
+  terms: () => req<TermsInfo>('GET', '/api/terms'),
+  saveTerms: (t: Terms) => req<Terms>('PUT', '/api/terms', t),
+  runTerms: () => req<Action[]>('POST', '/api/terms/run'),
+  shop: () => req<ShopInfo>('GET', '/api/shop'),
+  saveShop: (s: Partial<ShopInfo['settings']>) => req<ShopInfo['settings']>('PUT', '/api/shop', s),
+  host: () => req<HostInfo>('GET', '/api/host'),
+  practice: () => req<PracticeRow[]>('GET', '/api/practice'),
   setup: {
     status: () => req<SetupStatus>('GET', '/api/setup/status'),
     source: (body: unknown) =>
@@ -364,11 +508,12 @@ export const api = {
     preview: (id: string, controls: SetupControls) =>
       req<SetupPreview>('POST', `/api/setup/sources/${id}/preview`, { controls }),
     finish: (id: string, body: unknown) =>
-      req<{ ok: boolean; configPath: string; synced: { executed: number; pending: number } | null }>(
-        'POST',
-        `/api/setup/sources/${id}/finish`,
-        body,
-      ),
+      req<{
+        ok: boolean;
+        configPath: string;
+        consoleUrl: string;
+        synced: { executed: number; pending: number } | null;
+      }>('POST', `/api/setup/sources/${id}/finish`, body),
     sampleUrl: (f: string) => `/api/setup/samples/${encodeURIComponent(f)}`,
   },
 };
@@ -383,7 +528,7 @@ export type AgentEvent =
 
 /** POSTs a chat message and yields server-sent events as they arrive. */
 export async function chat(sessionId: string, message: string, onEvent: (e: AgentEvent) => void) {
-  const r = await fetch('/api/agent/chat', {
+  const r = await fetch(u('/api/agent/chat'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ sessionId, message }),
@@ -432,6 +577,9 @@ export const KIND_LABEL: Record<string, string> = {
   cancel_subscription: 'Cancel subscription',
   accept_dispute: 'Accept dispute',
   offer_payment_plan: 'Offer payment plan',
+  apply_late_fee: 'Add late fee',
+  expire_discount: 'End early-payment discount',
+  send_statement: 'Send statement',
 };
 
 export const DISCREPANCY_LABEL: Record<string, string> = {

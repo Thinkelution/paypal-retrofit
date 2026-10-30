@@ -487,6 +487,10 @@ dl.kv dd {
   gap: 8px;
   flex-wrap: wrap;
 }
+.ag-cell .actions-row {
+  height: 100%;
+  align-items: center;
+}
 .callout {
   border-radius: 8px;
   padding: 10px 12px;
@@ -1367,5 +1371,114 @@ ul.plain {
   }
   .digest-preview iframe {
     height: 560px;
+  }
+}
+
+/* ---------- customers, terms, shop, practice */
+.bad-text {
+  color: var(--bad);
+}
+.customers-top,
+.shop-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 16px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.shop-top {
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+}
+.customers-top h3,
+.shop-top h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
+}
+.requests {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.request {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 0;
+}
+.request > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.terms {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 14px 16px;
+  min-width: 0;
+}
+.terms select.search {
+  height: 32px;
+}
+.drawer.wide {
+  width: min(760px, 100vw);
+}
+.statement-frame {
+  width: 100%;
+  height: 640px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #eef1f5;
+}
+.catalog {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+}
+.catalog-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.catalog-item .price {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.shop-connect {
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 14px 16px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.shop-top .form-row {
+  margin: 12px 0;
+}
+.client-switch {
+  max-width: 220px;
+}
+.client-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+@media (max-width: 900px) {
+  .customers-top,
+  .shop-top {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

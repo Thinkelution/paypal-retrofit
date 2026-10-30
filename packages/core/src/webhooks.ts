@@ -1,3 +1,4 @@
+import { finalizeCheckout } from './commerce.ts';
 import type { Retrofit } from './engine.ts';
 import { PAID_STATUSES } from './paypal/client.ts';
 import { toMoney } from './util.ts';
@@ -105,7 +106,18 @@ async function applyEvent(rf: Retrofit, event: any): Promise<string | null> {
     return res?.summary ?? `Invoice ${id} is not managed by retrofit`;
   }
 
+  if (type.startsWith('CHECKOUT.ORDER.')) {
+    // A buyer approved (or completed) a portal, shop or agent checkout: capture and book it.
+    const res = r.id ? await finalizeCheckout(rf, String(r.id)) : null;
+    return res?.summary ?? null;
+  }
+
   if (type.startsWith('PAYMENT.CAPTURE.')) {
+    const orderId = r.supplementary_data?.related_ids?.order_id;
+    if (orderId && rf.state.getOrder(String(orderId))) {
+      const res = await finalizeCheckout(rf, String(orderId));
+      return res?.summary ?? null;
+    }
     // Invoice payments carry the merchant invoice number in invoice_id.
     const number: string | undefined = r.invoice_id;
     const link = number ? await findInvoiceLinkByNumber(rf, number) : undefined;
@@ -159,6 +171,8 @@ async function applyEvent(rf: Retrofit, event: any): Promise<string | null> {
       (tx.seller_transaction_id &&
         rf.state.listLinks('invoice').find((l) => l.paypalTransactionId === tx.seller_transaction_id)) ||
       undefined;
+    // A dispute naming an invoice this business does not have belongs to another account or workspace.
+    if (!link && tx.invoice_number) return null;
     const pk = link?.legacyPk ?? null;
     if (type === 'CUSTOMER.DISPUTE.RESOLVED') {
       for (const d of rf.state

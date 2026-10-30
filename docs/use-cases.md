@@ -168,3 +168,54 @@ In the Xero and QuickBooks exports each fee is its own negative line, so they re
 **Logic.** retrofit is an MCP server. The tools are the Ops agent's own (reads marked read-only, writes limited to `propose_action` and `run_collections`), so an MCP client gets the same answers and the same policy gate. Approving from the client is off unless the server is started with `--allow-approve` / `RETROFIT_MCP_ALLOW_APPROVE=1`; on a password-protected console the HTTP endpoint needs `RETROFIT_MCP_TOKEN` as a bearer token.
 
 **See it.** `claude mcp add --transport http paypal-retrofit http://localhost:8787/mcp`, then ask "give me my morning briefing" or use the `chase_overdue` prompt.
+
+---
+
+## 13. "Can I see everything I owe you?"
+
+**Real life.** A property manager has three open invoices from the plumber and wants to pay them together, not click three PayPal emails.
+
+**Logic.** Each customer has a private portal link (in statements and the console). It lists every issued, open invoice with fees and discounts, and pays any selection in one PayPal checkout (Orders API). After capture retrofit records a PayPal payment on each invoice, writes them back as paid, and splits PayPal's fee across them in the books.
+
+**See it.** Brightside Plumbing → **Customers** → **Portal ↗** → tick two invoices → **Pay selected with PayPal**.
+
+---
+
+## 14. "I'll pay on the 20th" / "Can I split it?" / "I think this is wrong"
+
+**Real life.** Customers tell you things, by phone or email, and the reminders keep going anyway.
+
+**Logic.** In the portal a customer can promise a date, ask for 2–4 instalments, or ask a question about an invoice. Promises hold reminders until the date; questions hold them until the owner marks them answered; plan requests queue an `offer_payment_plan` for the owner's approval. None of them gets a late fee. All of them show in the digest.
+
+**See it.** Open a customer's portal → **Need more time…** → any of the three. Then look at **Collections** and **Approvals**.
+
+---
+
+## 15. Late fees and early-payment discounts
+
+**Real life.** "2% off if you pay within 10 days; 2% added after 30 days late."
+
+**Logic.** Owner rules on the Customers tab. New invoices get the discount on the PayPal invoice while the window is open, and it comes off by itself after. The late fee is a line added to the PayPal invoice once it is far enough overdue, proposed by the collections run and approved like any action. Reconciliation, statements, risk and the forecast all use the adjusted amount.
+
+**See it.** Brightside Plumbing: BP-2427 and BP-2428 carry the discount; **Collections → Run playbook** proposes late fees for the oldest bills.
+
+---
+
+## 16. A buyer's AI agent books a session
+
+**Real life.** Someone asks their assistant to "book a portrait session with Fernhill Studio".
+
+**Logic.** The shop's buyer MCP server lists and searches the catalogue (from the business's own product table) and creates a PayPal checkout. The agent cannot pay; it hands the person a PayPal approval link. Prices are the business's, orders over the owner's cap are refused, and the paid order is captured by webhook and booked with its fee.
+
+**See it.** `claude mcp add --transport http fernhill-shop http://localhost:8787/mcp/shop`, then ask. Or open `/shop` yourself.
+
+---
+
+## 17. The bookkeeper with twenty clients
+
+**Real life.** An accountant looks after many small businesses and wants to know, each morning, which ones need them.
+
+**Logic.** `paypal-retrofit practice --dir clients` runs every client folder as its own workspace (own data, PayPal account, rules, digest, portal) and shows one overview sorted by approvals waiting, customer requests and mismatches. **Add a client** runs the setup wizard.
+
+**See it.** Client picker → **All clients…** in the demo.
+

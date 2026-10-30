@@ -2,7 +2,7 @@
 
 **Give any existing business a PayPal brain.** paypal-retrofit is an open-source SDK, CLI and console that lets an AI agent wire PayPal into a business system that already exists: its own database, its own invoice numbers, its own customers. Then it keeps both sides reconciled, with an agent that never moves money without a rule the owner set.
 
-It is also a product an owner can use without a developer: a **no-code setup wizard**, a **morning digest** by email or Slack with one-click approvals, and an **MCP server** so Claude Desktop, Claude Code or any MCP client can run receivables under the same rules.
+It is also a product an owner can use without a developer: a **no-code setup wizard**, a **morning digest** by email or Slack with one-click approvals, and an **MCP server** so Claude Desktop, Claude Code or any MCP client can run receivables under the same rules. Their customers get a **self-service portal** and statements; new buyers and **AI shopping agents** can buy from the business's own catalogue through PayPal checkout; **late fees and early-payment discounts** run as owner rules; and a **bookkeeper** can run every client from one screen.
 
 > Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/) (October–November 2026). MIT licensed. Website: <https://thinkelution.github.io/paypal-retrofit/>
 
@@ -83,7 +83,10 @@ Open <http://localhost:8787>. You get three things in one process:
 
 | URL | What it is |
 | --- | --- |
-| `/` | The Retrofit console (ledger, collections, insights, approvals, digest, discrepancies, mapping, webhooks, agent) |
+| `/` | The Retrofit console for Fernhill (ledger, collections, customers, insights, approvals, digest, shop, discrepancies, mapping, webhooks, agent) |
+| `/c/brightside/` | A second client, **Brightside Plumbing** (CSV exports, with late fees and early-payment discounts) |
+| `/#practice` | Every client on one screen (the bookkeeper's view) |
+| `/shop` | Fernhill's shop page for new buyers; `/mcp/shop` is the same shop for AI shopping agents |
 | `/#setup` | The setup wizard: try it with your own CSV exports or the Brightside Plumbing sample |
 | `/mcp` | The MCP endpoint (Streamable HTTP) |
 | `/fernhill` | **Fernhill Studio**, a fictional photography studio's old invoicing app. 40 invoices, 17 overdue, all marked paid by hand |
@@ -116,7 +119,9 @@ pnpm retrofit webhooks register --url https://your-host/webhooks/paypal
 | `forecast` | Cash expected over the next 9 weeks and the riskiest invoices |
 | `export journal --month YYYY-MM --format xero` | Payments with gross, fee and net, for your accountant |
 | `serve` | Webhook receiver, REST API, console and MCP endpoint, with background sync, reconciliation and the daily digest. Without a config it opens the setup wizard |
-| `mcp [--allow-approve]` | Run as an MCP server on stdio for Claude Desktop or Claude Code |
+| `mcp [--allow-approve] [--shop]` | Run as an MCP server on stdio for Claude Desktop or Claude Code; `--shop` serves the buyer-facing shop tools instead |
+| `practice --dir clients` | Multi-client mode for bookkeepers: every client folder becomes a workspace at `/c/<client>`, with one overview |
+| `statements [--run]` | Customer balances; `--run` queues a statement email for every customer with an open balance |
 | `digest [--send] [--out file.html]` | Print the owner's digest, save it as HTML, or send it by email (`RETROFIT_SMTP_URL`) and Slack (`RETROFIT_SLACK_WEBHOOK_URL`) |
 | `chat` | The Ops agent in your terminal |
 | `actions [--approve id] [--reject id] [--run-now id]` | Pending and scheduled actions from the terminal |
@@ -143,14 +148,41 @@ pnpm retrofit webhooks register --url https://your-host/webhooks/paypal
 
 More detail: [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Around the business: customers, buyers' agents and bookkeepers
+
+retrofit now covers everyone who touches the money, not only the owner.
+
+| Who | What they get | How it works |
+| --- | --- | --- |
+| **The business's customers** | A private **portal link**: every open invoice, pay several at once in one PayPal checkout, download a statement, say "I'll pay by the 20th", ask to pay in parts, or ask a question | Signed, expiring link per customer; multi-invoice payments use **PayPal Orders** and are recorded against each PayPal invoice, with the capture fee split by amount. Promises and questions hold reminders; a plan request queues a plan offer for the owner. **Statements** (balances, aging, pay links, portal link) go out by email under the owner's rules. |
+| **New buyers and their AI agents** | A **shop page**, a `catalog.json` feed and a **buyer-facing MCP server** (`/mcp/shop`): `list_products`, `search_catalog`, `create_checkout`, `get_checkout_status` | Agentic commerce on the business's own data. Prices come only from the product table; orders are capped; the agent gets a PayPal approval link and **a person always approves the payment**. The webhook captures the order and books it into the payments ledger and the Xero / QuickBooks exports. |
+| **The owner** | **Late fees** (percent or flat, after N days) and **early-payment discounts** (X% within N days) as rules | The discount goes on new PayPal invoices while the window is open and comes off by itself; the late fee is added as a line on the PayPal invoice (customer notified). Never charged to customers on a plan, disputing, or who promised a date. Reconciliation knows the difference is expected. |
+| **A bookkeeper or accountant** | **Multi-client mode**: every client business on one overview, sorted by who needs attention, each with its own console at `/c/<client>` | `paypal-retrofit practice --dir clients` hosts every client folder in one process; **Add a client** runs the setup wizard. Each client keeps its own data, PayPal account, rules, digest, portal and MCP endpoint. |
+
+| Customer portal | Shop for buyers and their agents |
+| --- | --- |
+| ![A customer's portal: open invoices, pay several at once, promise a date](site/assets/portal.png) | ![Shop tab: catalogue, agent sales, buyer MCP endpoint](site/assets/shop.png) |
+
+| Customers and payment terms | All clients (bookkeeper view) |
+| --- | --- |
+| ![Customers tab: portal requests, payment terms, balances and statements](site/assets/customers.png) | ![Practice overview of every client](site/assets/practice.png) |
+
+Let Claude shop at a retrofitted business:
+
+```bash
+claude mcp add --transport http fernhill-shop http://localhost:8787/mcp/shop
+# then: "Book me a portrait session with Fernhill Studio"
+```
+
 ## PayPal features used
 
 | Area | Endpoints / tools |
 | --- | --- |
 | Invoicing v2 | create, get, update, send, remind, cancel, record payment, record refund, search; **partial payments** (`configuration.partial_payment`) for payment plans |
-| Payments v2 | capture refund |
+| **Orders v2** | create order (with `payment_source.paypal.experience_context`), get, capture: multi-invoice payments in the customer portal, the shop page and AI-agent checkouts |
+| Payments v2 | capture refund; capture fees for the payments ledger |
 | Catalog Products v1, Subscriptions v1 | product, plan and subscription creation, status, cancel |
-| Webhooks v1 | create webhook, list, verify signature; 15 event types (invoice paid/cancelled/refunded, captures, subscriptions, sales, disputes) |
+| Webhooks v1 | create webhook, list, verify signature; 17 event types (invoice paid/cancelled/refunded, captures, checkout orders, subscriptions, sales, disputes) |
 | Disputes v1 | list, get, accept claim (policy `never` by default) |
 | Transaction Search | PayPal fees for the payments ledger when a capture webhook was missed; agent tool |
 | **PayPal Agent Toolkit** (`@paypal/agent-toolkit`) | Supplies the Ops agent's read-only PayPal tools (invoices, disputes, transactions, insights, subscriptions, plans, products) in sandbox and production. Writes are deliberately not exposed to the agent. |
@@ -190,11 +222,13 @@ Live (production) mode is refused unless `RETROFIT_ALLOW_LIVE=1`. It has not bee
 
 ```
 packages/core         engine: adapters, mapping, PayPal client, sync, webhooks, reconcile, ledger,
-                      policy rules, collections, payment plans, risk, forecast, journal
+                      policy rules, collections, payment plans, risk, forecast, journal, payment terms,
+                      statements, Orders checkout (portal, shop, agents), digest
 packages/agents       Claude agents: Mapper, Ops (tool runner + PayPal Agent Toolkit), Support, reminder and digest writers
-packages/mcp          MCP server (stdio and Streamable HTTP) over the engine tools
+packages/mcp          owner MCP server over the engine tools, and the buyer-facing shop MCP server
 packages/server       Express API, webhook endpoint, SSE live updates, setup wizard API, digest delivery,
-                      one-click approval pages; samples/ holds the Brightside Plumbing CSVs
+                      one-click approval pages, customer portal, shop, multi-client host;
+                      samples/ holds the Brightside Plumbing CSVs
 packages/dashboard    React + AG Grid console
 packages/cli          paypal-retrofit CLI
 packages/mock-paypal  local PayPal stand-in for tests and offline demos
@@ -205,7 +239,8 @@ examples/legacy-invoicer  Fernhill Studio, the legacy app
 ## Development
 
 ```bash
-pnpm test        # 37 tests: engine, webhooks, reconcile, CSV, policies, quiet hours, plans, collections,
+pnpm test        # 43 tests: engine, webhooks, reconcile, CSV, policies, quiet hours, plans, collections,
+                 # payment terms, portal payments and requests, statements, shop MCP checkout, multi-client,
                  # risk, forecast, fees, agents, digest + approval links, setup wizard, MCP (in-memory and HTTP)
                  # (offline, against the mock and a fake Messages API)
 pnpm typecheck
@@ -220,6 +255,8 @@ pnpm dashboard:dev   # Vite dev server on :5173, proxied to a running `retrofit 
 - Risk and forecast are transparent heuristics learned from your own history, not a credit model. They get better as more invoices are paid through retrofit.
 - Not a compliance product. It does not handle card data; PayPal does.
 - The setup wizard keeps secrets out of the browser: PayPal and Anthropic keys still come from the environment. On the public demo it only accepts CSV uploads.
+- Shop and agent sales are booked in retrofit's payments ledger and exports, not yet written into the legacy system as new invoices (adapters only update existing rows today).
+- Portal payments for several invoices are recorded on each PayPal invoice as a PayPal payment, so PayPal shows them as "marked as paid"; retrofit counts them as collected through PayPal.
 
 ## License
 

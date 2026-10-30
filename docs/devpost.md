@@ -27,10 +27,17 @@ paypal-retrofit is an SDK, CLI and web console, plus a no-code setup wizard, an 
 - **Owner's morning digest.** Email or Slack every weekday: what came in (gross, fees, net), what is overdue, what waits for approval, who to call, what is at risk. Each waiting action has a signed, expiring Review link that opens an Approve / Reject page.
 - **MCP server.** `paypal-retrofit mcp` (stdio) or `POST /mcp` (Streamable HTTP) gives Claude Desktop, Claude Code or any MCP client the same tools and the same policy gate as the built-in Ops agent, with prompts such as `morning_briefing` and `chase_overdue`.
 
+### Around the business
+
+- **Customer portal and statements.** Every customer gets a private link: all open invoices, pay several at once in one PayPal checkout (Orders API, recorded against each invoice), download a statement, promise a date, ask to pay in parts, or ask a question. Promises and questions hold reminders; plan requests queue a plan offer for the owner's approval.
+- **Agentic commerce.** A shop page, a catalogue feed and a buyer-facing MCP server let new buyers, and their AI shopping agents, buy from the business's own catalogue. Prices come only from the business's data, orders are capped, and a person always approves the payment at PayPal; captured orders land in the books with their fees.
+- **Late fees and early-payment discounts** as owner rules, applied to the PayPal invoice, explained to the customer, skipped for anyone on a plan, disputing or who promised a date, and understood by reconciliation.
+- **Bookkeeper multi-client mode.** `paypal-retrofit practice` runs many client businesses in one process, with an overview of who needs attention and each client's console at `/c/<client>`.
+
 ## How we built it
 
 - TypeScript monorepo: engine (`core`), agents, MCP server (official `@modelcontextprotocol/sdk`), Express server with the setup wizard API and digest delivery, React console, CLI, and a local PayPal mock for offline tests.
-- PayPal: Invoicing v2 (create, send, remind, cancel, record payment/refund, search), Payments v2 capture refunds, Catalog Products, Billing Plans and Subscriptions, Webhooks (create, verify signature, 15 event types), Disputes, Transaction Search, and the **PayPal Agent Toolkit**, whose read tools are bridged into Claude's tool runner.
+- PayPal: Invoicing v2 (create, send, remind, cancel, record payment/refund, search, invoice discounts), **Orders v2** (create, capture) for the portal, shop and agent checkouts, Payments v2 capture refunds, Catalog Products, Billing Plans and Subscriptions, Webhooks (create, verify signature, 17 event types), Disputes, Transaction Search, and the **PayPal Agent Toolkit**, whose read tools are bridged into Claude's tool runner.
 - AI: Claude (`claude-opus-5-5`) through the official Anthropic SDK. Structured outputs for the Mapper and Support agents; the SDK tool runner for the Ops agent; server-side refusal fallback; masked personal data; read-only SQL.
 - AG Grid Community for every table in the console, including editable mapping grids. Render Blueprint for hosting.
 
@@ -44,7 +51,7 @@ Retrofitting is mostly about state: what the old system believes, what PayPal be
 
 ## What's next
 
-Late fees and early-payment discounts as policy, customer statements, multi-currency, and learning the best reminder timing per customer from what actually gets paid.
+Writing shop sales back into the legacy system as new invoices, multi-currency, a practice-wide digest for bookkeepers, and learning the best reminder timing per customer from what actually gets paid.
 
 ## Earlier ideas still on the list
 

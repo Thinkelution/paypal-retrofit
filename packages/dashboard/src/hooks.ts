@@ -1,3 +1,4 @@
+import { u } from './api';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export function useDark(): boolean {
@@ -41,7 +42,7 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 function onServerChange(fn: () => void) {
   listeners.add(fn);
   if (!source) {
-    source = new EventSource('/api/stream');
+    source = new EventSource(u('/api/stream'));
     source.onmessage = (m) => {
       const e = JSON.parse(m.data);
       if (e.type === 'hello') return;

@@ -23,6 +23,9 @@ const LABEL: Record<ActionKind, string> = {
   cancel_subscription: 'cancelling subscriptions',
   accept_dispute: 'accepting dispute claims',
   offer_payment_plan: 'payment plans',
+  apply_late_fee: 'late fees',
+  expire_discount: 'ending early-payment discounts',
+  send_statement: 'customer statements',
 };
 
 /**

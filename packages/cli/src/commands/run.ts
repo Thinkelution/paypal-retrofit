@@ -2,6 +2,8 @@ import * as p from '@clack/prompts';
 import { claudeConfigured, draftReminders, OpsAgent } from '@paypal-retrofit/agents';
 import {
   cashForecast,
+  listCustomers,
+  publicBaseUrl,
   invoiceRisks,
   journal,
   journalCsv,
@@ -19,7 +21,7 @@ import {
   WEBHOOK_EVENTS,
   type ResolvedConfig,
 } from '@paypal-retrofit/core';
-import { serveStdio } from '@paypal-retrofit/mcp';
+import { serveShopStdio, serveStdio } from '@paypal-retrofit/mcp';
 import { createHost, prepareDigest, sendDigest } from '@paypal-retrofit/server';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -166,10 +168,80 @@ export async function serve(opts: { config?: string; port?: string; watch?: bool
   });
 }
 
-export async function mcp(opts: { config?: string; allowApprove?: boolean }) {
+export async function mcp(opts: { config?: string; allowApprove?: boolean; shop?: boolean }) {
   const rf = open(opts.config);
+  if (opts.shop) {
+    await serveShopStdio(rf, { baseUrl: publicBaseUrl(rf.config) ?? 'http://localhost:8787' });
+    console.error(`paypal-retrofit buyer MCP server ready on stdio (${rf.config.business.name} shop)`);
+    return;
+  }
   await serveStdio(rf, { allowApprove: Boolean(opts.allowApprove) });
   console.error(`paypal-retrofit MCP server ready on stdio (${rf.config.business.name})`);
+}
+
+/** A bookkeeper's practice: every client folder in --dir is a workspace, with an overview at the root. */
+export async function practice(opts: { dir?: string; port?: string }) {
+  const dir = path.resolve(opts.dir ?? 'clients');
+  fs.mkdirSync(dir, { recursive: true });
+  const port = Number(opts.port ?? process.env.PORT ?? 8787);
+  const workspaces = fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && fs.existsSync(path.join(dir, d.name, 'retrofit.config.yaml')))
+    .map((d) => ({
+      id: d.name.toLowerCase().replace(/[^a-z0-9-]+/g, '-'),
+      configPath: path.join(dir, d.name, 'retrofit.config.yaml'),
+    }));
+  const host = createHost({
+    mode: 'practice',
+    workspaces,
+    server: { watch: true, reconcileEverySeconds: 300 },
+    setup: { workspaceRoot: dir, allowServerPaths: true, allowReconfigure: true },
+  });
+  await host.start();
+  host.app.listen(port, () => {
+    console.log(
+      `${c.bold('paypal-retrofit practice')} ${host.workspaces.size} client${host.workspaces.size === 1 ? '' : 's'} from ${c.dim(dir)}`,
+    );
+    for (const w of host.workspaces.values())
+      console.log(
+        `  ${w.rf.config.business.name.padEnd(28)} ${c.cyan(`http://localhost:${port}/c/${w.id}/`)}`,
+      );
+    console.log(
+      `  Overview ${c.cyan(`http://localhost:${port}/`)}   add a client: ${c.cyan(`http://localhost:${port}/#setup`)}`,
+    );
+  });
+}
+
+export async function statements(opts: { config?: string; run?: boolean }) {
+  const rf = open(opts.config);
+  try {
+    const rows = (await listCustomers(rf)).filter((x) => x.balance > 0);
+    console.log(
+      table(
+        rows.map((x) => ({
+          customer: x.name,
+          open: x.openInvoices,
+          balance: x.balance.toFixed(2),
+          overdue: x.overdue.toFixed(2),
+          'oldest (days)': x.oldestDaysOverdue,
+          requests: x.openRequests || '',
+        })),
+      ),
+    );
+    if (!opts.run) return;
+    for (const x of rows) {
+      const a = await rf.propose({
+        origin: 'cli',
+        kind: 'send_statement',
+        target: { entity: 'customer', legacyPk: x.pk, label: x.name },
+        payload: { balance: x.balance },
+        reason: `Statement for ${x.name}: ${x.balance.toFixed(2)} ${rf.mapping.currency} open`,
+      });
+      console.log(`  ${x.name}: ${a.status}${a.policyReason ? c.dim(` (${a.policyReason})`) : ''}`);
+    }
+  } finally {
+    await rf.close();
+  }
 }
 
 export async function digest(opts: { config?: string; send?: boolean; out?: string; ai?: boolean }) {

@@ -17,3 +17,6 @@ export * from './policy.ts';
 export * from './insights.ts';
 export * from './collections.ts';
 export * from './digest.ts';
+export * from './terms.ts';
+export * from './statements.ts';
+export * from './commerce.ts';

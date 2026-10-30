@@ -1,6 +1,9 @@
 import { betaZodTool } from '@anthropic-ai/sdk/helpers/beta/zod';
 import {
   ACTION_KINDS,
+  buildStatement,
+  listCustomers,
+  planTerms,
   cashForecast,
   customerProfiles,
   invoiceRisks,
@@ -177,11 +180,13 @@ export function engineTools(
 - create_subscription / cancel_subscription: target entity "subscription"; cancel takes {reason}.
 - accept_dispute: payload {disputeId, note}.
 - offer_payment_plan: payload {installments: 2-12, intervalDays?: 7-92, firstDue?: YYYY-MM-DD}. Uses PayPal partial payments on the same invoice; use it when a customer asked to pay in parts.
+- apply_late_fee: payload {amount}. Adds the owner's late fee to the PayPal invoice; usually proposed by run_collections under the owner's terms.
+- send_statement: target entity "customer", number = the customer key from customer_accounts. Emails the customer their statement with pay links and their portal link.
 Results include "status": "executed", "pending" (needs approval), "scheduled" (held for quiet hours; see runAfter) or "rejected", plus "policyReason" explaining which rule applied.
 Call it once per target. Always tell the user what you proposed and whether it ran or is waiting for approval.`,
     inputSchema: z.object({
       kind: z.enum(ACTION_KINDS),
-      entity: z.enum(['invoice', 'subscription']),
+      entity: z.enum(['invoice', 'subscription', 'customer']),
       number: z
         .string()
         .describe('Legacy invoice number (for invoices) or subscription id/title (for subscriptions)'),
@@ -189,6 +194,21 @@ Call it once per target. Always tell the user what you proposed and whether it r
       reason: z.string().describe('One sentence a person will read when approving'),
     }),
     run: wrap('propose_action', async ({ kind, entity, number, payload, reason }) => {
+      if (entity === 'customer') {
+        const c = (await listCustomers(rf)).find(
+          (x) => x.pk === number || x.name.toLowerCase() === number.toLowerCase(),
+        );
+        if (!c) return { error: `No customer matching "${number}"` };
+        const action = await rf.propose({
+          origin: 'agent',
+          kind,
+          target: { entity: 'customer', legacyPk: c.pk, label: c.name },
+          payload: payload ?? {},
+          reason,
+        });
+        emit({ type: 'action_proposed', name: 'propose_action', action });
+        return { id: action.id, kind: action.kind, status: action.status, policyReason: action.policyReason };
+      }
       const row = (await ledger(rf)).find(
         (r) =>
           r.entity === entity && (r.number.toLowerCase() === number.toLowerCase() || r.legacyPk === number),
@@ -306,8 +326,65 @@ Call it once per target. Always tell the user what you proposed and whether it r
     ),
   });
 
+  const customers = betaZodTool({
+    name: 'customer_accounts',
+    description:
+      'Every customer with an open balance: what they owe, how much is overdue, the oldest overdue days, last payment, open portal requests and how they usually pay.',
+    inputSchema: z.object({ customer: z.string().optional().describe('Part of a customer name') }),
+    run: wrap('customer_accounts', async ({ customer }) =>
+      (await listCustomers(rf)).filter(
+        (c) => c.balance > 0 && (!customer || c.name.toLowerCase().includes(customer.toLowerCase())),
+      ),
+    ),
+  });
+
+  const statement = betaZodTool({
+    name: 'customer_statement',
+    description:
+      "One customer's statement: open invoices with balances, fees and discounts, aging buckets and payments in the last 90 days. Use the customer key from customer_accounts.",
+    inputSchema: z.object({ customerPk: z.string() }),
+    run: wrap('customer_statement', async ({ customerPk }) => buildStatement(rf, customerPk)),
+  });
+
+  const requests = betaZodTool({
+    name: 'customer_requests',
+    description:
+      'What customers told the business in the self-service portal: promises to pay by a date, requests to pay in parts, and questions about invoices.',
+    inputSchema: z.object({ includeDone: z.boolean().optional() }),
+    run: wrap('customer_requests', async ({ includeDone }) =>
+      rf.state.listRequests(includeDone ? {} : { status: 'open' }),
+    ),
+  });
+
+  const orders = betaZodTool({
+    name: 'sales_orders',
+    description:
+      'Orders paid through PayPal checkout: shop and AI-shopping-agent sales from the catalogue, and portal payments covering several invoices.',
+    inputSchema: z.object({ channel: z.enum(['shop', 'agent', 'portal']).optional() }),
+    run: wrap('sales_orders', async ({ channel }) =>
+      rf.state.listOrders(100).filter((o) => !channel || o.channel === channel),
+    ),
+  });
+
+  const termsPlan = betaZodTool({
+    name: 'payment_terms',
+    description:
+      "The owner's payment terms (late fee, early-payment discount), the fees and discounts already applied, and the late fees or discount expiries due today. Read-only; run_collections proposes them.",
+    inputSchema: z.object({}),
+    run: wrap('payment_terms', async () => ({
+      terms: rf.mapping.terms,
+      applied: rf.state.listAdjustments(),
+      dueToday: await planTerms(rf),
+    })),
+  });
+
   return [
     businessSummary,
+    customers,
+    statement,
+    requests,
+    orders,
+    termsPlan,
     collectionsPlan,
     collectionsRun,
     forecast,
