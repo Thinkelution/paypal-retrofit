@@ -328,6 +328,7 @@
     <nav aria-label="Sections">
       <a href="#how">How it works</a>
       <a href="#use-cases">Use cases</a>
+      <a href="#beyond">Beyond the SDK</a>
       <a href="#agents">Agents</a>
       <a href="#safety">Safety</a>
       <a href="#screens">Screens</a>
@@ -355,6 +356,7 @@
         <span>No schema changes</span>
         <span>SQLite, Postgres or CSV</span>
         <span>Collections, payment plans and cash forecast built in</span>
+        <span>No-code setup, morning digest and an MCP server</span>
         <span>Runs offline with a bundled PayPal mock</span>
         <span>PayPal sandbox ready</span>
       </div>
@@ -621,7 +623,61 @@
     </div>
   </section>
 
-  <section class="alt" id="agents">
+  <section class="alt" id="beyond">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">More than an SDK</span>
+        <h2 style="margin-top:14px">Three more ways in. One set of rules.</h2>
+        <p>Developers get the SDK and CLI. Owners get a setup wizard and a morning email. Anyone who already lives in Claude gets an MCP server. All of them go through the same policy gate, so nothing moves money without a rule the owner set.</p>
+      </div>
+      <div class="uc-grid">
+        <article class="uc">
+          <p class="quote">“I don't have a developer. I have CSV exports.”</p>
+          <h3>No-code setup wizard</h3>
+          <p>Four steps in the browser, and nothing reaches PayPal until the last one.</p>
+          <ul>
+            <li>Upload CSVs (or connect SQLite / Postgres when run locally); Claude maps them</li>
+            <li>Rules in plain words: “refunds up to $100 run on their own”, “no reminders after 8 pm”</li>
+            <li>Preview exactly what the first sync sends, then <b>Go live</b> without a restart</li>
+          </ul>
+          <div class="uses"><span>Mapper agent</span><span>Sync planner</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“Just tell me over breakfast what needs me.”</p>
+          <h3>Owner's morning digest</h3>
+          <p>Every weekday at 08:00 in the business's time zone, by email, Slack or both.</p>
+          <ul>
+            <li>What came in (gross, PayPal fees, net), what is overdue, who to call</li>
+            <li>Each waiting action has a signed, expiring <b>Review</b> link with Approve and Reject</li>
+            <li>Claude writes the opening; the numbers are always computed</li>
+          </ul>
+          <div class="uses"><span>Email · Slack</span><span>One-click approvals</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“Claude, chase everything more than two weeks late.”</p>
+          <h3>MCP server</h3>
+          <p>Claude Desktop, Claude Code or any MCP client gets the Ops agent's tools, over stdio or Streamable HTTP.</p>
+          <ul>
+            <li>Digest, collections, forecast, risk, customer history, month-end, read-only SQL, PayPal reads</li>
+            <li>Writes only through <code>propose_action</code> and <code>run_collections</code>, under your policies</li>
+            <li>Prompts: <code>morning_briefing</code>, <code>chase_overdue</code>, <code>month_end</code></li>
+          </ul>
+          <div class="uses"><span>Model Context Protocol</span><span>Policy gate</span></div>
+        </article>
+      </div>
+      <div class="showcase">
+        <figure><button type="button" data-full="assets/setup.png"><img src="assets/setup.png" width="1440" height="1000" alt="Setup wizard, last step: totals for open invoices and what the first sync will send, the list of first invoices, the drafts that are left alone, and a Go live button." loading="lazy"></button><figcaption><b>Setup wizard</b>A plumbing business's CSV exports, mapped and previewed: 15 invoices go to PayPal, 2 drafts stay put.</figcaption></figure>
+        <figure><button type="button" data-full="assets/digest.png"><img src="assets/digest.png" width="1440" height="1000" alt="Digest tab: the schedule and delivery channels beside a preview of the owner's email, with money in, overdue totals and a list of actions waiting for approval, each with a Review button." loading="lazy"></button><figcaption><b>Owner's digest</b>The morning email, with a Review button on every action that waits for the owner.</figcaption></figure>
+      </div>
+<pre class="term" id="mcp-code" style="margin-top:24px"><span class="d"># Claude Code, against a running console</span>
+<span class="p">$</span> claude mcp add --transport http paypal-retrofit http://localhost:8787/mcp
+
+<span class="d"># Claude Desktop (stdio)</span>
+<span class="p">$</span> node packages/cli/bin/paypal-retrofit.js mcp -c retrofit.config.yaml</pre>
+    </div>
+  </section>
+
+  <section id="agents">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">AI agents</span>
@@ -668,7 +724,7 @@
     </div>
   </section>
 
-  <section id="safety">
+  <section class="alt" id="safety">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Safety</span>
@@ -703,7 +759,7 @@
     </div>
   </section>
 
-  <section class="alt" id="screens">
+  <section id="screens">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">The console</span>
@@ -720,7 +776,7 @@
     </div>
   </section>
 
-  <section id="paypal">
+  <section class="alt" id="paypal">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">PayPal platform</span>
@@ -743,7 +799,7 @@
     </div>
   </section>
 
-  <section class="alt" id="start">
+  <section id="start">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Quick start</span>
@@ -778,6 +834,8 @@
               <li>Watch the legacy app's row turn <code>paid</code>.</li>
               <li>Approve the new retainer as a subscription.</li>
               <li>Simulate a buyer dispute and draft a response.</li>
+              <li>Open <b>Digest</b> and approve a reminder from its <b>Review</b> link.</li>
+              <li>Press <b>Try your own data</b> and set up the sample plumbing business.</li>
             </ol>
           </div>
           <div class="note">
@@ -789,7 +847,7 @@
     </div>
   </section>
 
-  <section id="hackathon">
+  <section class="alt" id="hackathon">
     <div class="wrap">
       <div class="hack">
         <div>
@@ -811,7 +869,7 @@
     </div>
   </section>
 
-  <section class="alt" id="faq">
+  <section id="faq">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">FAQ</span>
@@ -821,6 +879,8 @@
         <details><summary>Does it change my database?</summary><p>No schema changes, ever. Retrofit reads your tables and writes only to the columns your mapping names, such as a PayPal invoice id or a paid date. If you have no such columns, it keeps the links in its own state store. For CSV sources it writes to sidecar files and leaves the originals untouched.</p></details>
         <details><summary>Do I need a PayPal account to try it?</summary><p>No. The demo ships with a local stand-in for the PayPal endpoints retrofit uses, with signed webhooks and customer pay pages. To use the real PayPal sandbox, create a free developer app and run the demo with <code>--sandbox</code>.</p></details>
         <details><summary>Can the AI move money on its own?</summary><p>Only within rules you set. Agents can only propose actions; each kind of action has a policy (auto, confirm or never), optionally by amount, with daily caps. By default small refunds run on their own, larger ones, cancellations and reminders wait for your approval, and accepting disputes is refused.</p></details>
+        <details><summary>Do I need to be technical?</summary><p>No. Run <code>paypal-retrofit serve</code> (or use a hosted copy) and the console opens a four-step setup wizard: upload CSV exports, check the mapping, choose your rules in plain words, preview, go live. After that the morning digest comes to your inbox or Slack, and you approve things from your phone.</p></details>
+        <details><summary>Can I use it from Claude Desktop or Claude Code?</summary><p>Yes. retrofit is an MCP server: <code>paypal-retrofit mcp</code> over stdio, or <code>/mcp</code> over HTTP. Your Claude gets the same tools and the same rules as the built-in agent; anything that needs your OK still waits for it. Approving from the client is off unless you turn it on.</p></details>
         <details><summary>Which AI model does it use?</summary><p>Claude through the official Anthropic SDK, defaulting to <code>claude-opus-5-5</code>. You can choose another model with <code>RETROFIT_MODEL</code>.</p></details>
         <details><summary>Is it production ready?</summary><p>Not yet. It is built and tested against PayPal's sandbox APIs and refuses production mode unless explicitly enabled. Treat it as a strong starting point, not a finished payments product.</p></details>
         <details><summary>Is this an official PayPal product?</summary><p>No. paypal-retrofit is an independent open-source project built on PayPal's public APIs and Agent Toolkit. It is not affiliated with or endorsed by PayPal.</p></details>

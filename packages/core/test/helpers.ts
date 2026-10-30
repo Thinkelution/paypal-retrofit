@@ -57,6 +57,7 @@ export async function harness(opts: { autoApprove?: boolean; quietHours?: boolea
     paypal: { invoicePrefix: '' },
     webhook: {},
     sync: { intervalSeconds: 60 },
+    digest: { enabled: false, time: '08:00', weekdaysOnly: true, to: [] },
     baseDir: dir,
     configPath: path.join(dir, 'retrofit.config.yaml'),
     env: resolveEnv(),

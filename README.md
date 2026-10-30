@@ -2,6 +2,8 @@
 
 **Give any existing business a PayPal brain.** paypal-retrofit is an open-source SDK, CLI and console that lets an AI agent wire PayPal into a business system that already exists: its own database, its own invoice numbers, its own customers. Then it keeps both sides reconciled, with an agent that never moves money without a rule the owner set.
 
+It is also a product an owner can use without a developer: a **no-code setup wizard**, a **morning digest** by email or Slack with one-click approvals, and an **MCP server** so Claude Desktop, Claude Code or any MCP client can run receivables under the same rules.
+
 > Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/) (October–November 2026). MIT licensed. Website: <https://thinkelution.github.io/paypal-retrofit/>
 
 ## The problem
@@ -33,6 +35,39 @@ Beyond connecting PayPal, retrofit runs the receivables work a careful bookkeepe
 
 ![Collections playbook](site/assets/collections.png)
 
+## More than an SDK
+
+The same engine, three more ways in. Each one goes through the same policy gate, so nothing moves money without a rule the owner set.
+
+| Surface | Who it is for | What it does |
+| --- | --- | --- |
+| **Setup wizard** | Owners who never open a terminal | Upload CSV exports (or point at SQLite / Postgres locally), let Claude map them, adjust the mapping in a grid, choose the rules in plain language ("refunds up to $100 run on their own", "no reminders after 8 pm"), preview exactly what the first sync will send, then **Go live**. The running server switches to the new workspace without a restart. `paypal-retrofit serve` opens it whenever there is no config yet; the hosted demo has **Try your own data** with a sample plumbing business. |
+| **Owner's digest** | The owner, every weekday at 08:00 | One short email or Slack post: what came in (gross, PayPal fees, net), what is overdue, what is waiting for approval, who to call, which invoices are at risk, and what the collections playbook will do today. Each waiting action has a signed, expiring **Review** link that opens an Approve / Reject page. Claude can write the opening lines. Every digest is also kept in the console outbox. |
+| **MCP server** | Claude Desktop, Claude Code, any MCP client | `paypal-retrofit mcp` (stdio) or `POST /mcp` (Streamable HTTP) exposes the Ops agent's tools: `owner_digest`, `collections_plan`, `run_collections`, `cash_forecast`, `payment_risk`, `customer_history`, `month_end_summary`, `find_invoices`, `invoice_detail`, read-only `legacy_sql`, `propose_action` and the PayPal Agent Toolkit reads, plus prompts (`morning_briefing`, `chase_overdue`, `month_end`) and resources. Reads are marked read-only; approving from the client is off unless you turn it on. |
+
+| Setup wizard | Owner's digest |
+| --- | --- |
+| ![Setup wizard: preview and go live](site/assets/setup.png) | ![Owner's digest in the console](site/assets/digest.png) |
+
+Connect Claude Code to a running console:
+
+```bash
+claude mcp add --transport http paypal-retrofit http://localhost:8787/mcp
+```
+
+Or Claude Desktop over stdio (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "paypal-retrofit": {
+      "command": "node",
+      "args": ["/path/to/paypal-retrofit/packages/cli/bin/paypal-retrofit.js", "mcp", "-c", "/path/to/retrofit.config.yaml"]
+    }
+  }
+}
+```
+
 ## Try it in two minutes (no accounts needed)
 
 ```bash
@@ -48,7 +83,9 @@ Open <http://localhost:8787>. You get three things in one process:
 
 | URL | What it is |
 | --- | --- |
-| `/` | The Retrofit console (ledger, approvals, discrepancies, mapping, webhooks, agent) |
+| `/` | The Retrofit console (ledger, collections, insights, approvals, digest, discrepancies, mapping, webhooks, agent) |
+| `/#setup` | The setup wizard: try it with your own CSV exports or the Brightside Plumbing sample |
+| `/mcp` | The MCP endpoint (Streamable HTTP) |
 | `/fernhill` | **Fernhill Studio**, a fictional photography studio's old invoicing app. 40 invoices, 17 overdue, all marked paid by hand |
 | `/mock-paypal` | A local stand-in for the PayPal endpoints retrofit uses, with buyer pay pages and signed webhooks |
 
@@ -57,6 +94,8 @@ Then: press **Send 22 invoices through PayPal**, open any invoice, press **Pay a
 To run against the **real PayPal sandbox** instead, see [Using the PayPal sandbox](#using-the-paypal-sandbox).
 
 ## Use it on your own system
+
+No terminal skills needed beyond starting it: `pnpm retrofit serve` in an empty folder opens the setup wizard at <http://localhost:8787>. Or from the command line:
 
 ```bash
 cp .env.example .env            # add PayPal sandbox credentials and ANTHROPIC_API_KEY
@@ -76,7 +115,9 @@ pnpm retrofit webhooks register --url https://your-host/webhooks/paypal
 | `collections [--run]` | The collections playbook's decision for every open invoice; `--run` queues the reminders and plan offers |
 | `forecast` | Cash expected over the next 9 weeks and the riskiest invoices |
 | `export journal --month YYYY-MM --format xero` | Payments with gross, fee and net, for your accountant |
-| `serve` | Webhook receiver, REST API and console, with background sync (every `sync.intervalSeconds`) and reconciliation |
+| `serve` | Webhook receiver, REST API, console and MCP endpoint, with background sync, reconciliation and the daily digest. Without a config it opens the setup wizard |
+| `mcp [--allow-approve]` | Run as an MCP server on stdio for Claude Desktop or Claude Code |
+| `digest [--send] [--out file.html]` | Print the owner's digest, save it as HTML, or send it by email (`RETROFIT_SMTP_URL`) and Slack (`RETROFIT_SLACK_WEBHOOK_URL`) |
 | `chat` | The Ops agent in your terminal |
 | `actions [--approve id] [--reject id] [--run-now id]` | Pending and scheduled actions from the terminal |
 | `webhooks register --url` | Create the PayPal webhook with the right event list |
@@ -122,6 +163,8 @@ More detail: [ARCHITECTURE.md](ARCHITECTURE.md).
 | **Ops** | Claude via the SDK tool runner | Answers receivables questions using the ledger, read-only SQL on the legacy database, PayPal Agent Toolkit tools, the collections plan, payment risk, customer history, the cash forecast and month-end figures. Acts only through `propose_action` and `run_collections`, which the policy engine decides. |
 | **Support** | Claude, structured outputs | Drafts a dispute response and evidence checklist from the PayPal dispute and the legacy invoice. Text only; the owner submits it. |
 | **Reminder writer** | Claude, structured outputs, low effort | Writes each collections reminder in the requested tone from the invoice facts and the customer's payment history. Told never to threaten, mention fees or legal action, or invent facts. Falls back to templates. |
+| **Digest writer** | Claude, structured outputs, low effort | Writes the two or three opening sentences of the owner's digest from its facts: what came in and the one or two decisions that matter today. Falls back to a deterministic headline. |
+| **Your own Claude, over MCP** | Whatever model your MCP client uses | Claude Desktop or Claude Code gets the same tools and the same policy gate as the built-in Ops agent. |
 
 Guardrails: personal data is masked before it reaches the model (sample rows, tool results); SQL from the agent runs on a read-only connection; no forced tool choice; refusals are handled and fall back server-side; the agent cannot claim an action happened unless the engine reports it executed.
 
@@ -148,8 +191,10 @@ Live (production) mode is refused unless `RETROFIT_ALLOW_LIVE=1`. It has not bee
 ```
 packages/core         engine: adapters, mapping, PayPal client, sync, webhooks, reconcile, ledger,
                       policy rules, collections, payment plans, risk, forecast, journal
-packages/agents       Claude agents: Mapper, Ops (tool runner + PayPal Agent Toolkit), Support
-packages/server       Express API, webhook endpoint, SSE live updates
+packages/agents       Claude agents: Mapper, Ops (tool runner + PayPal Agent Toolkit), Support, reminder and digest writers
+packages/mcp          MCP server (stdio and Streamable HTTP) over the engine tools
+packages/server       Express API, webhook endpoint, SSE live updates, setup wizard API, digest delivery,
+                      one-click approval pages; samples/ holds the Brightside Plumbing CSVs
 packages/dashboard    React + AG Grid console
 packages/cli          paypal-retrofit CLI
 packages/mock-paypal  local PayPal stand-in for tests and offline demos
@@ -160,8 +205,9 @@ examples/legacy-invoicer  Fernhill Studio, the legacy app
 ## Development
 
 ```bash
-pnpm test        # 27 tests: engine, webhooks, reconcile, CSV, policies, quiet hours, plans, collections,
-                 # risk, forecast, fees, agents (offline, against the mock and a fake Messages API)
+pnpm test        # 37 tests: engine, webhooks, reconcile, CSV, policies, quiet hours, plans, collections,
+                 # risk, forecast, fees, agents, digest + approval links, setup wizard, MCP (in-memory and HTTP)
+                 # (offline, against the mock and a fake Messages API)
 pnpm typecheck
 pnpm lint
 pnpm dashboard:dev   # Vite dev server on :5173, proxied to a running `retrofit demo`
@@ -173,6 +219,7 @@ pnpm dashboard:dev   # Vite dev server on :5173, proxied to a running `retrofit 
 - One currency per mapping. Taxes, discounts and partial refunds are passed through but not modelled.
 - Risk and forecast are transparent heuristics learned from your own history, not a credit model. They get better as more invoices are paid through retrofit.
 - Not a compliance product. It does not handle card data; PayPal does.
+- The setup wizard keeps secrets out of the browser: PayPal and Anthropic keys still come from the environment. On the public demo it only accepts CSV uploads.
 
 ## License
 

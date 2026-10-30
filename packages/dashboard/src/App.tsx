@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ago, api, fmtMoney, type Config, type LedgerRow } from './api';
+import { ago, api, fmtMoney, type Config, type LedgerRow, type SetupStatus } from './api';
 import { AgentPanel } from './components/AgentPanel';
 import { DisputeDraft } from './components/DisputeDraft';
+import { McpConnect } from './components/McpConnect';
 import { RecordDrawer } from './components/RecordDrawer';
 import { useDark, useLive, useToast } from './hooks';
 import { Activity } from './pages/Activity';
@@ -11,13 +12,17 @@ import { Ledger } from './pages/Ledger';
 import { Mapping } from './pages/Mapping';
 import { Collections } from './pages/Collections';
 import { Insights } from './pages/Insights';
+import { Digest } from './pages/Digest';
+import { Setup } from './pages/Setup';
 
-type Tab = 'ledger' | 'collections' | 'insights' | 'approvals' | 'discrepancies' | 'mapping' | 'activity';
+type Tab =
+  'ledger' | 'collections' | 'insights' | 'approvals' | 'digest' | 'discrepancies' | 'mapping' | 'activity';
 const TABS: Tab[] = [
   'ledger',
   'collections',
   'insights',
   'approvals',
+  'digest',
   'discrepancies',
   'mapping',
   'activity',
@@ -27,8 +32,45 @@ const tabFromHash = (): Tab => {
   return TABS.includes(h) ? h : 'ledger';
 };
 
+/** Opens the setup wizard when nothing is configured yet (or on #setup where the server allows it). */
 export function App() {
   const dark = useDark();
+  const [status, setStatus] = useState<SetupStatus | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [wantSetup, setWantSetup] = useState(() => window.location.hash === '#setup');
+  useEffect(() => {
+    api.setup
+      .status()
+      .then(setStatus)
+      .catch((e) => setFailed((e as Error).message));
+    const on = () => setWantSetup(window.location.hash === '#setup');
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
+  if (failed)
+    return (
+      <div className="empty">
+        <h3>Can't reach the retrofit server</h3>
+        <p>{failed}</p>
+      </div>
+    );
+  if (!status) return <div className="empty">Loading…</div>;
+  if (!status.configured) return <Setup status={status} dark={dark} />;
+  if (wantSetup && status.canSetup)
+    return (
+      <Setup
+        status={status}
+        dark={dark}
+        onCancel={() => {
+          window.location.hash = '';
+          setWantSetup(false);
+        }}
+      />
+    );
+  return <Console dark={dark} canSetup={status.canSetup} />;
+}
+
+function Console({ dark, canSetup }: { dark: boolean; canSetup: boolean }) {
   const [config, setConfig] = useState<Config | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [tab, setTabState] = useState<Tab>(tabFromHash);
@@ -46,6 +88,7 @@ export function App() {
   const [agentQ, setAgentQ] = useState<string | null>(null);
   const [dispute, setDispute] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [mcpOpen, setMcpOpen] = useState(false);
   const { msg, toast } = useToast();
   const summary = useLive(() => api.summary());
   const ledger = useLive(() => api.ledger());
@@ -132,22 +175,35 @@ export function App() {
         <span className="muted hide-sm" style={{ fontSize: 12 }}>
           Synced {ago(s?.lastSyncAt)} · webhook {ago(s?.lastWebhookAt)}
         </span>
-        {config.demo && (
+        {config.demo && !config.demo.custom && (
           <a className="btn sm" href={config.demo.legacyAppPath} target="_blank" rel="noreferrer">
             Legacy app ↗
+          </a>
+        )}
+        {canSetup && (
+          <a className="btn sm" href="#setup">
+            {config.demo ? 'Try your own data' : 'Setup'}
           </a>
         )}
         {config.demo?.mockPath && (
           <button
             className="btn sm"
             onClick={async () => {
-              if (!confirm('Reset the demo? This reseeds Fernhill and clears PayPal mock data.')) return;
+              if (
+                !confirm(
+                  config.demo?.custom
+                    ? 'Go back to the Fernhill demo? Your uploaded workspace stays on the server but is no longer shown.'
+                    : 'Reset the demo? This reseeds Fernhill and clears PayPal mock data.',
+                )
+              )
+                return;
               await api.resetDemo();
+              if (config.demo?.custom) return window.location.reload();
               toast('Demo reset');
               refresh();
             }}
           >
-            Reset demo
+            {config.demo.custom ? 'Back to Fernhill' : 'Reset demo'}
           </button>
         )}
         <button className="btn sm" onClick={runReconcile} disabled={!!busy}>
@@ -219,6 +275,7 @@ export function App() {
               ['collections', 'Collections', null],
               ['insights', 'Insights', null],
               ['approvals', 'Approvals', (s?.pendingActions ?? 0) + (s?.scheduledActions ?? 0)],
+              ['digest', 'Digest', null],
               ['discrepancies', 'Discrepancies', s?.discrepancies],
               ['mapping', 'Mapping', null],
               ['activity', 'Webhooks', null],
@@ -273,12 +330,16 @@ export function App() {
           />
         )}
         {tab === 'insights' && <Insights dark={dark} config={config} />}
+        {tab === 'digest' && <Digest config={config} toast={toast} />}
         {tab === 'mapping' && <Mapping dark={dark} toast={toast} />}
         {tab === 'activity' && <Activity dark={dark} />}
 
         <p className="muted" style={{ fontSize: 12, margin: 0 }}>
           paypal-retrofit · open source (MIT) · {config.source.kind} source · agents{' '}
-          {config.agentAvailable ? `on (${config.model})` : 'off'}
+          {config.agentAvailable ? `on (${config.model})` : 'off'} ·{' '}
+          <button className="linkish" onClick={() => setMcpOpen(true)}>
+            Connect Claude (MCP)
+          </button>
         </p>
       </main>
 
@@ -293,6 +354,7 @@ export function App() {
         />
       )}
       {dispute && <DisputeDraft disputeId={dispute} onClose={() => setDispute(null)} />}
+      {mcpOpen && <McpConnect business={config.business.name} onClose={() => setMcpOpen(false)} />}
       {!agentOpen && (
         <button className="btn primary fab" onClick={() => setAgentOpen(true)}>
           Ask the agent

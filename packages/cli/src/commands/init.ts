@@ -6,7 +6,7 @@ import {
   openSource,
   RetrofitMapping,
   writeConfig,
-  type RetrofitConfig,
+  type RetrofitConfigInput,
 } from '@paypal-retrofit/core';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -90,7 +90,7 @@ export async function init(opts: InitOptions) {
     source.startsWith('sqlite:') || source.startsWith('csv:')
       ? `${source.split(':')[0]}:${path.relative(dir, path.resolve(source.slice(source.indexOf(':') + 1))) || '.'}`
       : source;
-  const cfg: RetrofitConfig = {
+  const cfg: RetrofitConfigInput = {
     source: absSource.replace(/\\/g, '/'),
     mapping: './retrofit.map.json',
     state: './.retrofit/state.db',

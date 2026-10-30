@@ -75,6 +75,10 @@ CREATE TABLE IF NOT EXISTS payments (
   gross REAL NOT NULL, fee REAL, net REAL, currency TEXT NOT NULL, method TEXT, occurred_at TEXT NOT NULL, recorded_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS payments_at ON payments (occurred_at);
+CREATE TABLE IF NOT EXISTS digests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, trigger TEXT NOT NULL, subject TEXT NOT NULL,
+  deliveries TEXT NOT NULL, html TEXT NOT NULL, text TEXT NOT NULL
+);
 `;
 
 const MIGRATIONS: Array<[table: string, column: string, ddl: string]> = [
@@ -93,6 +97,20 @@ export interface PlanRecord {
   status: 'active' | 'completed' | 'cancelled';
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DigestDelivery {
+  channel: 'email' | 'slack' | 'outbox';
+  status: 'sent' | 'failed' | 'skipped';
+  detail: string;
+}
+
+export interface DigestRecord {
+  id: number;
+  createdAt: string;
+  trigger: 'schedule' | 'manual';
+  subject: string;
+  deliveries: DigestDelivery[];
 }
 
 export interface PaymentRecord {
@@ -333,6 +351,37 @@ export class StateStore {
     this.db
       .prepare(`UPDATE payments SET fee=?, net=ROUND(gross-?, 2) WHERE id=? AND fee IS NULL`)
       .run(fee, fee, id);
+  }
+  addDigest(d: {
+    trigger: DigestRecord['trigger'];
+    subject: string;
+    deliveries: DigestDelivery[];
+    html: string;
+    text: string;
+  }): number {
+    const r = this.db
+      .prepare(
+        `INSERT INTO digests (created_at, trigger, subject, deliveries, html, text) VALUES (?,?,?,?,?,?)`,
+      )
+      .run(now(), d.trigger, d.subject, JSON.stringify(d.deliveries), d.html, d.text);
+    return Number(r.lastInsertRowid);
+  }
+  listDigests(limit = 20): DigestRecord[] {
+    return (
+      this.db
+        .prepare(`SELECT id, created_at, trigger, subject, deliveries FROM digests ORDER BY id DESC LIMIT ?`)
+        .all(limit) as any[]
+    ).map((r) => ({
+      id: r.id,
+      createdAt: r.created_at,
+      trigger: r.trigger,
+      subject: r.subject,
+      deliveries: JSON.parse(r.deliveries),
+    }));
+  }
+  getDigestHtml(id: number): string | undefined {
+    return (this.db.prepare(`SELECT html FROM digests WHERE id=?`).get(id) as { html: string } | undefined)
+      ?.html;
   }
   listPayments(fromIso?: string, toIso?: string): PaymentRecord[] {
     return this.db

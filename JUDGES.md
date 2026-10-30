@@ -18,6 +18,9 @@ What to try (about 3 minutes):
 8. **Collections** shows the playbook's decision for every overdue invoice. INV-1042 is on **Hold** (its note says the customer promised to pay), INV-1038 gets **Offer plan** (the customer asked to split it), the rest get a friendly first reminder. Press **Run playbook**; the reminders wait in Approvals. If it is evening or the weekend in Pacific time, approved reminders show as **Scheduled** for 08:00 with a **Send now** button.
 9. Approve the INV-1038 payment plan, open INV-1038 → **Pay as customer** → **Pay instalment**. The legacy app shows the running total, the drawer shows "1 of 2 instalments paid", and nothing is flagged as a problem.
 10. **Insights** shows the 9-week cash forecast, late-payment risk with reasons (Tom Whitaker and Daniel Reyes habitually pay late), and how each customer pays. Under **Month-end books**, download the Xero or QuickBooks file: each PayPal fee is its own line.
+11. **Digest** shows the owner's morning email: what came in, what waits for approval, who to call. Press **Review** on any waiting item: it opens a signed approval page with **Approve** and **Reject**, exactly what the owner gets in their inbox or Slack. **Send now** puts a copy in the outbox (and sends it, where SMTP or Slack is configured).
+12. **Try your own data** (top bar) opens the no-code setup wizard. Upload CSV exports, or pick the **Brightside Plumbing** sample (odd column names: `bills`, `reference`, `amount_due`, `state`). Check the mapping, set the rules in plain words, preview the first sync, **Go live**: the console switches to the new business without a restart. **Back to Fernhill** returns to the demo.
+13. **Connect Claude (MCP)** (footer) shows how to plug Claude Code or Claude Desktop into the same engine. With Claude Code: `claude mcp add --transport http paypal-retrofit <demo-url>/mcp`, then ask "give me my morning briefing" or "chase the overdue invoices". Anything that needs approval still waits in **Approvals**.
 
 Shortcut: `node scripts/stage-demo.mjs` puts a fresh demo into this lived-in state in a few seconds.
 
@@ -59,7 +62,7 @@ Log in to <https://www.sandbox.paypal.com> as the buyer to pay an invoice. PayPa
 ## Checks
 
 ```bash
-pnpm test         # engine, webhooks, reconcile, CSV, agents; all offline
+pnpm test         # 37 tests: engine, webhooks, reconcile, CSV, agents, digest, setup wizard, MCP; all offline
 pnpm smoke:sandbox   # live sandbox: create, send and record one invoice (needs credentials)
 ```
 

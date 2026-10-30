@@ -37,7 +37,24 @@ const INVOICE_FIELDS: Array<[string, string[], boolean]> = [
   ['write back: paid amount', ['writeBack', 'paidAmount'], false],
 ];
 
-export function Mapping({ dark, toast }: { dark: boolean; toast: (m: string) => void }) {
+export function Mapping({
+  dark,
+  toast,
+  load: loadFn = async () => {
+    const [mapping, schema] = await Promise.all([api.mapping(), api.schema()]);
+    return { mapping, schema };
+  },
+  save: saveFn = api.saveMapping,
+  embedded = false,
+}: {
+  dark: boolean;
+  toast: (m: string) => void;
+  /** Where the mapping and schema come from (the setup wizard passes its own). */
+  load?: () => Promise<{ mapping: any; schema: any }>;
+  save?: (m: unknown) => Promise<any>;
+  /** Inside the setup wizard: no panel title, a lighter save button. */
+  embedded?: boolean;
+}) {
   const [mapping, setMapping] = useState<any>(null);
   const [schema, setSchema] = useState<any>(null);
   const [fields, setFields] = useState<FieldRow[]>([]);
@@ -47,7 +64,7 @@ export function Mapping({ dark, toast }: { dark: boolean; toast: (m: string) => 
   const [dirty, setDirty] = useState(false);
 
   const load = async () => {
-    const [m, s] = await Promise.all([api.mapping(), api.schema()]);
+    const { mapping: m, schema: s } = await loadFn();
     setMapping(m);
     setSchema(s);
     setDirty(false);
@@ -290,11 +307,11 @@ export function Mapping({ dark, toast }: { dark: boolean; toast: (m: string) => 
     m.policies = Object.fromEntries(policies.filter((p) => p.mode).map((p) => [p.kind, p.mode]));
     m.generatedBy = `${mapping.generatedBy} + edited in dashboard`;
     try {
-      const r = await api.saveMapping(m);
+      const r = await saveFn(m);
       setIssues(r.issues ?? []);
       setMapping(r.mapping);
       setDirty(false);
-      toast('Mapping saved');
+      toast(embedded ? 'Changes kept' : 'Mapping saved');
     } catch (e: any) {
       setIssues(e.data?.issues ?? [{ level: 'error', path: '', message: e.message }]);
       toast('Mapping has errors; not saved');
@@ -311,7 +328,7 @@ export function Mapping({ dark, toast }: { dark: boolean; toast: (m: string) => 
   return (
     <div className="panel">
       <div className="panel-head">
-        <h2>Mapping</h2>
+        {!embedded && <h2>Mapping</h2>}
         <span className="muted">
           How your tables become PayPal objects. Proposed by <b>{mapping.generatedBy}</b>. Retrofit never
           alters your schema; it only writes to the “write back” columns.
@@ -321,7 +338,7 @@ export function Mapping({ dark, toast }: { dark: boolean; toast: (m: string) => 
           Discard
         </button>
         <button className="btn primary sm" onClick={save} disabled={!dirty}>
-          Save mapping
+          {embedded ? 'Keep changes' : 'Save mapping'}
         </button>
       </div>
       <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

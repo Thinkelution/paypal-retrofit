@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assertReadOnlySql,
   CsvAdapter,
+  greetingName,
   heuristicMapping,
   invoiceDraft,
   redact,
@@ -111,5 +112,16 @@ describe('CSV source', () => {
     expect(fs.readFileSync(path.join(dir, 'bills.csv'), 'utf8')).not.toContain('INV2-ABC');
     await src.close();
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('greetingName', () => {
+  it('uses a first name for people and "there" for businesses', () => {
+    expect(greetingName('Maya Okafor')).toBe('Maya');
+    expect(greetingName('Marco Rossi')).toBe('Marco');
+    expect(greetingName('Harbor View Apartments')).toBe('there');
+    expect(greetingName('Piedmont Residence (Wu)')).toBe('there');
+    expect(greetingName('Smith & Sons')).toBe('there');
+    expect(greetingName('')).toBe('there');
   });
 });

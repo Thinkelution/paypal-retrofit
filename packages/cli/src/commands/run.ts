@@ -19,8 +19,10 @@ import {
   WEBHOOK_EVENTS,
   type ResolvedConfig,
 } from '@paypal-retrofit/core';
-import { createServer } from '@paypal-retrofit/server';
+import { serveStdio } from '@paypal-retrofit/mcp';
+import { createHost, prepareDigest, sendDigest } from '@paypal-retrofit/server';
 import fs from 'node:fs';
+import path from 'node:path';
 import readline from 'node:readline/promises';
 import { c, issuesSummary, planSummary, resultSummary, table } from '../ui.ts';
 
@@ -133,19 +135,63 @@ export async function actions(opts: {
 }
 
 export async function serve(opts: { config?: string; port?: string; watch?: boolean }) {
-  const rf = open(opts.config);
+  const configPath = path.resolve(opts.config ?? 'retrofit.config.yaml');
   const port = Number(opts.port ?? process.env.PORT ?? 8787);
-  const { app } = createServer(rf, { watch: opts.watch !== false, reconcileEverySeconds: 300 });
-  app.listen(port, () => {
-    console.log(
-      `${c.bold('paypal-retrofit')} serving ${c.cyan(`http://localhost:${port}`)}  (${rf.config.env.paypalEnvironment}, ${rf.config.business.name})`,
-    );
+  const host = createHost({
+    configPath,
+    server: { watch: opts.watch !== false, reconcileEverySeconds: 300 },
+    setup: {
+      workspaceRoot: path.join(path.dirname(configPath), '.retrofit', 'workspaces'),
+      configPath,
+      allowServerPaths: true,
+      allowReconfigure: false,
+    },
+    onActivate: (rf) =>
+      console.log(
+        `${c.bold('paypal-retrofit')} serving ${c.cyan(rf.config.business.name)} (${rf.config.env.paypalEnvironment})`,
+      ),
+  });
+  const rf = await host.start();
+  host.app.listen(port, () => {
+    const url = `http://localhost:${port}`;
+    if (!rf)
+      console.log(
+        `${c.bold('paypal-retrofit')} has no ${path.basename(configPath)} yet. Open ${c.cyan(url)} to run the setup wizard.`,
+      );
     console.log(
       c.dim(
-        `  webhook endpoint: POST /webhooks/paypal   agents: ${claudeConfigured() ? 'on' : 'off (no ANTHROPIC_API_KEY)'}`,
+        `  console ${url}   webhook POST /webhooks/paypal   MCP POST /mcp   agents: ${claudeConfigured() ? 'on' : 'off (no ANTHROPIC_API_KEY)'}`,
       ),
     );
   });
+}
+
+export async function mcp(opts: { config?: string; allowApprove?: boolean }) {
+  const rf = open(opts.config);
+  await serveStdio(rf, { allowApprove: Boolean(opts.allowApprove) });
+  console.error(`paypal-retrofit MCP server ready on stdio (${rf.config.business.name})`);
+}
+
+export async function digest(opts: { config?: string; send?: boolean; out?: string; ai?: boolean }) {
+  const rf = open(opts.config);
+  try {
+    if (opts.send) {
+      const r = await sendDigest(rf, { trigger: 'manual', ai: opts.ai !== false });
+      console.log(c.bold(r.subject));
+      for (const d of r.deliveries)
+        console.log(
+          `  ${d.status === 'sent' ? c.green('✔') : d.status === 'failed' ? c.red('✘') : c.dim('·')} ${d.channel}: ${d.detail}`,
+        );
+      return;
+    }
+    const p = await prepareDigest(rf, { ai: opts.ai !== false });
+    if (opts.out) {
+      fs.writeFileSync(opts.out, p.rendered.html);
+      console.log(`Wrote ${c.cyan(opts.out)} (${p.rendered.subject})`);
+    } else console.log(p.rendered.text);
+  } finally {
+    await rf.close();
+  }
 }
 
 export async function chat(opts: { config?: string }) {

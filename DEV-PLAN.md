@@ -22,6 +22,8 @@ Read this whole document before writing code. Sections 1 and 2 are non-negotiabl
 
 **Advanced features (added 2026-10-29, second pass; 27 tests):** collections playbook with AI-written reminders; payment plans on PayPal partial payments; approval rules by amount, daily limits and quiet hours with scheduled actions; late-payment risk, customer payment profiles and a 9-week cash forecast; a payments ledger with PayPal fees and CSV / Xero / QuickBooks exports. Scenarios and logic: docs/use-cases.md.
 
+**Beyond the SDK (added 2026-10-30, third pass; 37 tests):** a no-code setup wizard in the console (CSV upload or sample data, Claude mapping, plain-language rules, first-sync preview, go live without a restart; `serve` opens it when no config exists; the demo has "Try your own data"); the owner's daily digest (email via SMTP, Slack webhook, console outbox; signed one-click approval links; optional Claude-written opening; scheduled per business time zone); an MCP server package (`paypal-retrofit mcp` on stdio, `POST /mcp` Streamable HTTP) exposing the engine tools, prompts and resources under the same policy gate. Sample data: `packages/server/samples/brightside-plumbing`.
+
 **Changes from the plan:** the CLI runs TypeScript through `tsx` (no `tsup` build step); the Ops agent gets PayPal Agent Toolkit **read** tools only, and every write goes through `propose_action`; `demo` serves console, Fernhill and mock PayPal from one process, which is also what Render runs; the Postgres adapter is implemented but only exercised by typecheck, not by a live database test.
 
 **Not done / not verified (owner action needed):**
@@ -30,7 +32,8 @@ Read this whole document before writing code. Sections 1 and 2 are non-negotiabl
 2. Live Claude calls: no `ANTHROPIC_API_KEY` was available. The agent loop is tested against a fake Messages API; run `init` and the agent panel with a real key and tune prompts.
 3. Render deploy, `PAYPAL_WEBHOOK_ID`, JUDGES.md credentials, demo video, Devpost form (the TODO markers in JUDGES.md and docs/devpost.md). Done: public repo https://github.com/Thinkelution/paypal-retrofit (MIT detected) and landing page https://thinkelution.github.io/paypal-retrofit/ (GitHub Pages, deployed by .github/workflows/pages.yml).
 4. APIMatic Context Plugin: not used yet; only claim it if it is used.
-5. Stretch `expose` (MCP server for buyer agents) not started.
+5. The owner-side MCP server is built (see above). The buyer-facing `expose` stretch (an MCP server so shoppers' agents can discover a catalogue) is not started.
+6. Digest email and Slack delivery are tested against a local Slack stand-in only; send one real digest with `RETROFIT_SMTP_URL` / `RETROFIT_SLACK_WEBHOOK_URL` set, and connect Claude Code to `/mcp` on the hosted demo once it is deployed.
 
 ---
 

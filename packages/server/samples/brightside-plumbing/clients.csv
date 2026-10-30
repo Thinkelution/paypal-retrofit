@@ -1,0 +1,13 @@
+id,company,contact_name,email,phone,city,state,zip
+1,Harbor View Apartments,Maya Chen,maya.harbor@example.com,(510) 555-0110,Oakland,CA,94607
+2,Juniper Street Bakery,Luis Ortega,luis.juniper@example.com,(510) 555-0111,Berkeley,CA,94704
+3,Redwood Dental Group,Priya Nair,priya.redwood@example.com,(510) 555-0112,Oakland,CA,94610
+4,Castro Valley Yoga,Hannah Lee,hannah.castro@example.com,(510) 555-0113,Castro Valley,CA,94546
+5,Lakeshore Property Mgmt,Owen Brooks,owen.lakeshore@example.com,(510) 555-0114,Oakland,CA,94606
+6,Mission Peak Brewing,Diego Ramos,diego.mission@example.com,(510) 555-0115,Fremont,CA,94538
+7,Elmwood Day School,Grace Kim,grace.elmwood@example.com,(510) 555-0116,Berkeley,CA,94705
+8,Alameda Auto Spa,Sam Patel,sam.alameda@example.com,(510) 555-0117,Alameda,CA,94501
+9,Piedmont Residence (Wu),Jenny Wu,jenny.piedmont@example.com,(510) 555-0118,Piedmont,CA,94611
+10,Grand Lake Theater Cafe,Marcus Bell,marcus.grand@example.com,(510) 555-0119,Oakland,CA,94610
+11,Hayward Fitness Hub,Tasha Green,tasha.hayward@example.com,(510) 555-0120,Hayward,CA,94541
+12,Rockridge Florist,Nora Fischer,nora.rockridge@example.com,(510) 555-0121,Oakland,CA,94618

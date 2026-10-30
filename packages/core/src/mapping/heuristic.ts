@@ -53,8 +53,10 @@ export function heuristicMapping(
   const open = statuses.filter((s) => !isPaid(s) && !isCancelled(s));
   const push = open.filter((s) => !/draft/i.test(s));
 
+  const singular = invoices.name.replace(/s$/i, '').replace(/[^A-Za-z0-9_]/g, '');
   const fkToInvoice =
-    lines?.foreignKeys.find((f) => f.refTable === invoices.name)?.column ?? col(lines, [/invoice_?id/i]);
+    lines?.foreignKeys.find((f) => f.refTable === invoices.name)?.column ??
+    col(lines, [/invoice_?id/i, new RegExp(`^${singular}_?id$`, 'i')]);
 
   const m: RetrofitMapping = {
     version: 1,

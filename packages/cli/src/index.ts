@@ -6,9 +6,11 @@ import {
   actions,
   chat,
   collections,
+  digest,
   doctor,
   exportJournal,
   forecast,
+  mcp,
   registerWebhook,
   runReconcile,
   serve,
@@ -74,7 +76,9 @@ program
 
 program
   .command('serve')
-  .description('Webhook receiver + API + dashboard, with background sync and reconciliation')
+  .description(
+    'Webhook receiver + API + console + MCP endpoint, with background sync and reconciliation. Without a config, opens the setup wizard.',
+  )
   .option('-p, --port <port>')
   .option('--no-watch', 'do not sync in the background')
   .action(run((o) => serve({ ...o, config: cfg() })));
@@ -93,7 +97,9 @@ program
 
 program
   .command('collections')
-  .description('Collections playbook: who to remind, hold, offer a payment plan or call; --run queues the actions')
+  .description(
+    'Collections playbook: who to remind, hold, offer a payment plan or call; --run queues the actions',
+  )
   .option('--run', 'queue the reminders and payment-plan offers (policies still apply)')
   .option('--no-ai', 'use template reminders even if Claude is configured')
   .action(run((o) => collections({ ...o, config: cfg() })));
@@ -114,6 +120,23 @@ program
   .option('--format <format>', 'generic | xero | quickbooks', 'generic')
   .option('-o, --out <file>')
   .action(run((o) => exportJournal({ ...o, config: cfg() })));
+
+program
+  .command('mcp')
+  .description('Run as an MCP server on stdio for Claude Desktop, Claude Code or any MCP client')
+  .option('--allow-approve', 'let the MCP client approve and reject pending actions')
+  .action(run((o) => mcp({ ...o, config: cfg() })));
+
+program
+  .command('digest')
+  .description("The owner's daily digest: print it, save it as HTML, or send it to email / Slack")
+  .option(
+    '--send',
+    'deliver to the configured channels (RETROFIT_SMTP_URL + digest.to, RETROFIT_SLACK_WEBHOOK_URL)',
+  )
+  .option('-o, --out <file>', 'write the HTML email to a file')
+  .option('--no-ai', 'do not ask Claude to write the opening note')
+  .action(run((o) => digest({ ...o, config: cfg() })));
 
 program
   .command('status')

@@ -1,14 +1,13 @@
 import { claudeConfigured, proposeMapping } from '@paypal-retrofit/agents';
 import {
-  loadConfig,
   openSource,
   RetrofitMapping,
-  Retrofit,
   WEBHOOK_EVENTS,
   writeConfig,
+  type Retrofit,
 } from '@paypal-retrofit/core';
 import { createMockPayPal } from '@paypal-retrofit/mock-paypal';
-import { createServer } from '@paypal-retrofit/server';
+import { createHost } from '@paypal-retrofit/server';
 import { createFernhillApp, openDb, seed, seedInto } from 'fernhill-legacy-invoicer';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -85,17 +84,18 @@ export async function demo(opts: DemoOptions & { sandbox?: boolean }) {
     });
   }
 
-  const rf = new Retrofit(loadConfig(configFile));
+  const log = (m: string) => console.error(`[mock-paypal] ${m}`);
   const mock = useMock
     ? createMockPayPal({
         publicUrl: `${publicUrl}/mock-paypal`,
         dataFile: path.join(dir, 'mock-paypal.json'),
-        log: (m) => rf.log.info(m),
+        log,
       })
     : null;
   const fernDb = openDb(dbFile);
+  const fernApp = createFernhillApp(() => fernDb, '/fernhill');
 
-  const ensureWebhook = async () => {
+  const ensureWebhook = async (rf: Retrofit) => {
     const url = useMock ? `${internal}/webhooks/paypal` : `${publicUrl}/webhooks/paypal`;
     if (!useMock && !/^https:/.test(url)) {
       console.log(
@@ -110,55 +110,65 @@ export async function demo(opts: DemoOptions & { sandbox?: boolean }) {
     rf.state.setMeta('paypal.webhookId', wh.id);
   };
 
-  const { app } = createServer(rf, {
-    watch: false,
-    reconcileEverySeconds: 120,
-    mounts: [
-      ...(mock ? [{ path: '/mock-paypal', router: mock.app, public: true }] : []),
-      { path: '/fernhill', router: createFernhillApp(() => fernDb, '/fernhill') },
-    ],
-    demo: mock
-      ? {
-          legacyAppPath: '/fernhill',
-          mockPath: '/mock-paypal',
-          reset: async () => {
-            seedInto(fernDb);
-            rf.state.db.exec(
-              'DELETE FROM links; DELETE FROM events; DELETE FROM actions; DELETE FROM discrepancies; DELETE FROM meta; DELETE FROM plans; DELETE FROM payments;',
-            );
-            mock.reset();
-            await ensureWebhook();
-            rf.emit('reset');
-          },
-          dispute: async (paypalInvoiceId) => {
-            const r = await fetch(
-              `${internal}/mock-paypal/mock/api/invoices/${encodeURIComponent(paypalInvoiceId)}/dispute`,
-              { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
-            );
-            const body: any = await r.json();
-            if (!r.ok) throw new Error(body?.message ?? 'Could not open a dispute');
-            return body;
-          },
-        }
-      : {
-          legacyAppPath: '/fernhill',
-          mockPath: '',
-          reset: async () => {
-            throw new Error('Reset is only available with the mock');
-          },
-          dispute: async () => {
-            throw new Error('Disputes are opened by buyers in the PayPal sandbox');
-          },
+  const fernhillConfig = path.resolve(configFile);
+  const host = createHost({
+    configPath: fernhillConfig,
+    server: (_rf, activePath) => ({
+      watch: false,
+      reconcileEverySeconds: 120,
+      mounts: [
+        ...(mock ? [{ path: '/mock-paypal', router: mock.app, public: true }] : []),
+        { path: '/fernhill', router: fernApp },
+      ],
+      demo: {
+        legacyAppPath: '/fernhill',
+        mockPath: mock ? '/mock-paypal' : '',
+        custom: activePath !== fernhillConfig,
+        reset: async () => {
+          if (!mock) throw new Error('Reset is only available with the mock');
+          if (host.configPath !== fernhillConfig) await host.activate(fernhillConfig);
+          const rf = host.rf!;
+          seedInto(fernDb);
+          rf.state.db.exec(
+            'DELETE FROM links; DELETE FROM events; DELETE FROM actions; DELETE FROM discrepancies; DELETE FROM meta; DELETE FROM plans; DELETE FROM payments; DELETE FROM digests;',
+          );
+          mock.reset();
+          await ensureWebhook(rf);
+          rf.emit('reset');
         },
+        dispute: async (paypalInvoiceId: string) => {
+          if (!mock) throw new Error('Disputes are opened by buyers in the PayPal sandbox');
+          const r = await fetch(
+            `${internal}/mock-paypal/mock/api/invoices/${encodeURIComponent(paypalInvoiceId)}/dispute`,
+            { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+          );
+          const body: any = await r.json();
+          if (!r.ok) throw new Error(body?.message ?? 'Could not open a dispute');
+          return body;
+        },
+      },
+    }),
+    setup: {
+      workspaceRoot: path.join(dir, 'workspaces'),
+      // The hosted demo is public: only CSV uploads and the sample data, never server paths.
+      allowServerPaths: process.env.RETROFIT_SETUP_ALLOW_PATHS === '1',
+      allowReconfigure: true,
+      invoicePrefix: () => `W${Date.now().toString(36).slice(-4).toUpperCase()}-`,
+    },
+    onActivate: ensureWebhook,
   });
+  const { app } = host;
 
+  // Listen first: activating registers the webhook with the mock PayPal served by this same process.
   await new Promise<void>((resolve) => app.listen(port, resolve));
-  await ensureWebhook();
-  if (opts.sync) await rf.sync();
+  await host.start();
+  if (opts.sync) await host.rf!.sync();
   console.log(`
 ${c.bold('paypal-retrofit demo')} ${c.dim(useMock ? '(mock PayPal, no account needed)' : '(PayPal sandbox)')}
   Dashboard          ${c.cyan(publicUrl + '/')}
   Legacy app         ${c.cyan(publicUrl + '/fernhill')}
+  Your own data      ${c.cyan(publicUrl + '/#setup')}
+  MCP endpoint       ${c.cyan(publicUrl + '/mcp')}
   ${useMock ? `Mock PayPal        ${c.cyan(publicUrl + '/mock-paypal/mock/state')}` : ''}
   Ops agent          ${claudeConfigured() ? c.green('on') : c.yellow('off (set ANTHROPIC_API_KEY)')}
   Data               ${c.dim(dir)}

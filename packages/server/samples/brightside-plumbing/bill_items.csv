@@ -1,0 +1,42 @@
+id,bill_id,description,hours,rate
+1,1,Leak detection and repair,3,135
+2,1,"Drain cleaning, main line",2.5,145
+3,2,Sewer camera inspection,1,295
+4,3,Emergency call-out (after hours),1,225
+5,3,Sewer camera inspection,1,295
+6,4,Water heater replacement (50 gal),1,1450
+7,4,Emergency call-out (after hours),1,225
+8,5,Backflow test and certification,1,185
+9,6,Backflow test and certification,1,185
+10,6,Repipe: kitchen supply lines,6,125
+11,7,Sewer camera inspection,1,295
+12,8,Leak detection and repair,3,135
+13,9,Repipe: kitchen supply lines,6,125
+14,9,Water heater replacement (50 gal),1,1450
+15,10,"Drain cleaning, main line",2.5,145
+16,11,Leak detection and repair,3,135
+17,12,Fixture install: faucet + disposal,1,420
+18,13,Backflow test and certification,1,185
+19,14,Sewer camera inspection,1,295
+20,15,Emergency call-out (after hours),1,225
+21,15,Repipe: kitchen supply lines,6,125
+22,16,Leak detection and repair,3,135
+23,16,Leak detection and repair,3,135
+24,17,Sewer camera inspection,1,295
+25,18,Repipe: kitchen supply lines,6,125
+26,19,Backflow test and certification,1,185
+27,20,Repipe: kitchen supply lines,6,125
+28,20,Repipe: kitchen supply lines,6,125
+29,21,Water heater replacement (50 gal),1,1450
+30,22,Backflow test and certification,1,185
+31,23,Emergency call-out (after hours),1,225
+32,24,Leak detection and repair,3,135
+33,25,Water heater replacement (50 gal),1,1450
+34,26,Water heater replacement (50 gal),1,1450
+35,26,Repipe: kitchen supply lines,6,125
+36,27,Emergency call-out (after hours),1,225
+37,27,Leak detection and repair,3,135
+38,28,Water heater replacement (50 gal),1,1450
+39,28,Sewer camera inspection,1,295
+40,29,Water heater replacement (50 gal),1,1450
+41,30,Emergency call-out (after hours),1,225

@@ -27,8 +27,25 @@ export const RetrofitConfig = z.object({
     .default({}),
   webhook: z.object({ publicUrl: z.string().optional() }).default({}),
   sync: z.object({ intervalSeconds: z.number().int().min(10).default(60) }).default({}),
+  /** Public base URL of the console, used for links in digests (defaults from webhook.publicUrl). */
+  publicUrl: z.string().optional(),
+  /** The owner's morning digest. Delivery secrets (SMTP, Slack webhook) live in the environment. */
+  digest: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** Local time in the business time zone. */
+      time: z
+        .string()
+        .regex(/^\d{2}:\d{2}$/)
+        .default('08:00'),
+      weekdaysOnly: z.boolean().default(true),
+      /** Email recipients; needs RETROFIT_SMTP_URL. */
+      to: z.array(z.string()).default([]),
+    })
+    .default({}),
 });
 export type RetrofitConfig = z.infer<typeof RetrofitConfig>;
+export type RetrofitConfigInput = z.input<typeof RetrofitConfig>;
 
 export interface ResolvedConfig extends RetrofitConfig {
   /** Directory that relative paths in the config resolve against. */
@@ -43,6 +60,10 @@ export interface ResolvedConfig extends RetrofitConfig {
     anthropicConfigured: boolean;
     model: string;
     autoApprove: boolean;
+    smtpUrl?: string;
+    digestFrom?: string;
+    slackWebhookUrl?: string;
+    publicUrl?: string;
   };
 }
 
@@ -71,6 +92,10 @@ export function resolveEnv(cfg?: RetrofitConfig): ResolvedConfig['env'] {
     anthropicConfigured: Boolean(e.ANTHROPIC_API_KEY || e.ANTHROPIC_AUTH_TOKEN),
     model: e.RETROFIT_MODEL || 'claude-opus-5-5',
     autoApprove: e.RETROFIT_AUTO_APPROVE === '1',
+    smtpUrl: e.RETROFIT_SMTP_URL || undefined,
+    digestFrom: e.RETROFIT_DIGEST_FROM || undefined,
+    slackWebhookUrl: e.RETROFIT_SLACK_WEBHOOK_URL || undefined,
+    publicUrl: e.RETROFIT_PUBLIC_URL || undefined,
   };
 }
 
@@ -83,8 +108,8 @@ export function loadConfig(configPath = DEFAULT_CONFIG_FILE): ResolvedConfig {
   return { ...cfg, baseDir: path.dirname(abs), configPath: abs, env: resolveEnv(cfg) };
 }
 
-export function writeConfig(file: string, cfg: RetrofitConfig): void {
-  const doc = new YAML.Document(cfg);
+export function writeConfig(file: string, input: RetrofitConfigInput): void {
+  const doc = new YAML.Document(RetrofitConfig.parse(input));
   doc.commentBefore =
     ' paypal-retrofit configuration. Secrets (PayPal client secret, Anthropic key) live in .env, never here.';
   fs.writeFileSync(file, doc.toString());
@@ -102,4 +127,11 @@ export function loadMapping(cfg: ResolvedConfig): RetrofitMapping {
 
 export function saveMapping(cfg: ResolvedConfig, mapping: RetrofitMapping): void {
   fs.writeFileSync(resolvePath(cfg, cfg.mapping), JSON.stringify(mapping, null, 2) + '\n');
+}
+
+/** Where people reach the console, for links in digests and approval pages. */
+export function publicBaseUrl(cfg: ResolvedConfig): string | undefined {
+  const u =
+    cfg.env.publicUrl ?? cfg.publicUrl ?? cfg.webhook.publicUrl?.replace(/\/webhooks\/paypal\/?$/, '');
+  return u?.replace(/\/$/, '');
 }

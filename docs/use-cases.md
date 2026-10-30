@@ -138,3 +138,33 @@ In the Xero and QuickBooks exports each fee is its own negative line, so they re
 **Logic.** The dispute webhook opens a discrepancy on the invoice. Collections holds reminders for it. The Support agent drafts a response from the dispute and the legacy invoice, with a recommendation (contest, partial refund or accept), an evidence checklist and what is still missing. Accepting the claim is policy "never" by default; the owner replies in PayPal.
 
 **See it.** Open a paid invoice → **Simulate buyer dispute** → Discrepancies → **Draft response**. The draft needs `ANTHROPIC_API_KEY`.
+
+---
+
+## 10. "I don't have a developer"
+
+**Real life.** A plumbing business keeps its jobs in an invoicing tool that can export CSV, and nobody there will ever open a terminal.
+
+**Logic.** `paypal-retrofit serve` with no config opens the setup wizard. The owner uploads the exports; the Mapper agent (or the rule-based mapper) proposes how `clients`, `bills` and `bill_items` become PayPal customers, invoices and line items, and the owner adjusts any column in a grid. Rules are chosen in plain words and translated into policies, amount rules, daily limits, quiet hours and the reminder schedule. The preview runs the real sync planner against an in-memory state store, so it shows exactly which invoices go to PayPal and which are left alone (drafts, missing emails) before anything is sent. **Go live** writes `retrofit.config.yaml` and `retrofit.map.json` and switches the running server to them. Uploaded files are never modified: write-backs go to `*.retrofit.csv` sidecars.
+
+**See it.** In the demo, **Try your own data** → **Try the sample business** → follow the four steps. **Back to Fernhill** returns to the demo.
+
+---
+
+## 11. The owner reads email, not dashboards
+
+**Real life.** The owner checks their phone at breakfast and wants to know three things: did money come in, does anything need me, who should I call.
+
+**Logic.** Every weekday at 08:00 in the business's time zone (configurable; within three hours if the server was down), retrofit builds a digest from the same engine data as the console: payments since the last digest with fees and net, overdue totals, expected cash this week, actions waiting for approval with the rule that held them, actions held for quiet hours, customers the playbook says to call, the riskiest invoices and open discrepancies. Each waiting action gets a signed link that expires after 48 hours; opening it never changes anything, and the Approve / Reject buttons only work while the action is still pending. Approving goes through the same engine call as the console, so quiet hours and limits still apply. Claude can write the opening lines; the facts are always computed.
+
+**See it.** Console → **Digest** → **Review** on any item. `pnpm retrofit digest` prints it; `--send` delivers it.
+
+---
+
+## 12. "Ask Claude what's going on with my money"
+
+**Real life.** The owner already uses Claude Desktop or Claude Code and would rather ask there than open another app.
+
+**Logic.** retrofit is an MCP server. The tools are the Ops agent's own (reads marked read-only, writes limited to `propose_action` and `run_collections`), so an MCP client gets the same answers and the same policy gate. Approving from the client is off unless the server is started with `--allow-approve` / `RETROFIT_MCP_ALLOW_APPROVE=1`; on a password-protected console the HTTP endpoint needs `RETROFIT_MCP_TOKEN` as a bearer token.
+
+**See it.** `claude mcp add --transport http paypal-retrofit http://localhost:8787/mcp`, then ask "give me my morning briefing" or use the `chase_overdue` prompt.

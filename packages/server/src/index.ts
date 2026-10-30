@@ -8,6 +8,11 @@ import {
 } from '@paypal-retrofit/agents';
 import {
   ACTION_KINDS,
+  actionLinkSecret,
+  businessTimezone,
+  KIND_LABEL,
+  publicBaseUrl,
+  verifyActionToken,
   cashForecast,
   customerProfiles,
   handleWebhook,
@@ -29,11 +34,18 @@ import {
   type Retrofit,
   type SchemaDescription,
 } from '@paypal-retrofit/core';
+import { mcpHttpHandler } from '@paypal-retrofit/mcp';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { approvalPage, type ApprovalPageInput } from './approval-page.ts';
+import { digestChannels, digestSchedule, prepareDigest, runScheduledDigest, sendDigest } from './digest.ts';
+
+export * from './digest.ts';
+export * from './setup.ts';
+export * from './host.ts';
 
 export interface ServerOptions {
   /** Directory with the built dashboard (index.html). */
@@ -50,6 +62,8 @@ export interface ServerOptions {
     dispute: (paypalInvoiceId: string) => Promise<unknown>;
     legacyAppPath: string;
     mockPath: string;
+    /** The demo is running on a workspace made with the setup wizard instead of Fernhill. */
+    custom?: boolean;
   };
 }
 
@@ -75,21 +89,67 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
   });
   for (const m of opts.mounts ?? []) if (m.public) app.use(m.path, m.router);
 
-  // ---- everything else behind optional basic auth
-  const password = process.env.RETROFIT_DASHBOARD_PASSWORD;
-  if (password) {
-    app.use((req: Request, res: Response, next: NextFunction) => {
-      const [scheme, value] = (req.header('authorization') ?? '').split(' ');
-      const [, given] = scheme === 'Basic' && value ? Buffer.from(value, 'base64').toString().split(':') : [];
-      const ok =
-        given !== undefined &&
-        given.length === password.length &&
-        crypto.timingSafeEqual(Buffer.from(given), Buffer.from(password));
-      if (ok) return next();
-      res.setHeader('WWW-Authenticate', 'Basic realm="paypal-retrofit", charset="UTF-8"');
-      res.status(401).send('Authentication required');
+  // ---- MCP over Streamable HTTP: bearer token if RETROFIT_MCP_TOKEN is set; closed when the console has a password but MCP has no token
+  app.all('/mcp', express.json({ limit: '1mb' }), (req, res, next) => {
+    const token = process.env.RETROFIT_MCP_TOKEN;
+    const given = (req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
+    if (token ? !safeEqual(given, token) : Boolean(process.env.RETROFIT_DASHBOARD_PASSWORD)) {
+      res.setHeader('WWW-Authenticate', 'Bearer realm="paypal-retrofit"');
+      return res.status(401).json({
+        error: token ? 'Invalid token' : 'Set RETROFIT_MCP_TOKEN to use MCP on a password-protected console',
+      });
+    }
+    void mcpHttpHandler(() => rf, { allowApprove: process.env.RETROFIT_MCP_ALLOW_APPROVE === '1' })(
+      req,
+      res,
+    ).catch(next);
+  });
+
+  // ---- one-click approval links from the digest (the signed token is the credential; GET never changes anything)
+  const approval = express.Router();
+  approval.use(express.urlencoded({ extended: false }));
+  const fromToken = (token: string) => {
+    const v = verifyActionToken(actionLinkSecret(rf), token);
+    if ('error' in v) return { error: v.error };
+    const a = rf.state.getAction(v.actionId);
+    return a ? { action: a } : { error: 'This action no longer exists.' };
+  };
+  const page = (extra: Partial<ApprovalPageInput>) =>
+    approvalPage({
+      business: rf.config.business.name,
+      currency: rf.mapping.currency,
+      consoleUrl: '/#approvals',
+      timezone: businessTimezone(rf),
+      kindLabel: KIND_LABEL,
+      ...extra,
     });
-  }
+  approval.get('/:token', (req, res) => {
+    res.type('html').send(page(fromToken(req.params.token!)));
+  });
+  approval.post('/:token', async (req, res) => {
+    const r = fromToken(req.params.token!);
+    if (!r.action) return res.status(400).type('html').send(page(r));
+    if (r.action.status !== 'pending') return res.type('html').send(page({ action: r.action }));
+    const decision = req.body?.decision === 'reject' ? 'reject' : 'approve';
+    try {
+      const after =
+        decision === 'reject'
+          ? rf.reject(r.action.id, 'Rejected from the digest link')
+          : await rf.approve(r.action.id);
+      rf.emit('action', { id: after.id });
+      res.type('html').send(page({ action: after, done: decision }));
+    } catch (e) {
+      res
+        .status(500)
+        .type('html')
+        .send(page({ action: r.action, error: (e as Error).message }));
+    }
+  });
+  app.use('/a', approval);
+
+  // ---- everything else behind optional basic auth
+  const auth = basicAuth();
+  if (auth) app.use(auth);
   for (const m of opts.mounts ?? []) if (!m.public) app.use(m.path, m.router);
 
   const api = express.Router();
@@ -110,7 +170,14 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
       actionKinds: ACTION_KINDS,
       policies: Object.fromEntries(ACTION_KINDS.map((k) => [k, rf.policyFor(k)])),
       source: { kind: rf.source.kind },
-      demo: opts.demo ? { legacyAppPath: opts.demo.legacyAppPath, mockPath: opts.demo.mockPath } : null,
+      demo: opts.demo
+        ? {
+            legacyAppPath: opts.demo.legacyAppPath,
+            mockPath: opts.demo.mockPath,
+            custom: Boolean(opts.demo.custom),
+          }
+        : null,
+      mcpPath: '/mcp',
       webhookConfigured: Boolean(rf.config.env.paypalWebhookId ?? rf.state.getMeta('paypal.webhookId')),
       controls: {
         rules: rf.mapping.rules,
@@ -324,28 +391,43 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
     }),
   );
 
-  app.use('/api', api);
-
-  const dist = opts.dashboardDir ?? DEFAULT_DASHBOARD_DIR;
-  if (fs.existsSync(path.join(dist, 'index.html'))) {
-    app.use(express.static(dist, { index: false, maxAge: '1h' }));
-    app.get('*', (req, res, next) =>
-      req.path.startsWith('/api') ? next() : res.sendFile(path.join(dist, 'index.html')),
-    );
-  } else {
-    app.get('/', (_req, res) =>
-      res
-        .type('text/plain')
-        .send('paypal-retrofit API is running. Build the dashboard with "pnpm build" to get the UI.'),
-    );
-  }
-
-  // Scheduled actions (held for quiet hours) run when their time comes.
-  timers.push(
-    setInterval(
-      () => void rf.runDue().catch((e) => rf.log.warn(`scheduled actions failed: ${(e as Error).message}`)),
-      60000,
+  // ---- the owner's digest
+  const origin = (req: Request) => publicBaseUrl(rf.config) ?? `${req.protocol}://${req.get('host')}`;
+  api.get('/digest', (_req, res) =>
+    res.json({
+      schedule: digestSchedule(rf),
+      channels: digestChannels(rf),
+      history: rf.state.listDigests(20),
+    }),
+  );
+  api.get(
+    '/digest/preview',
+    wrap(async (req, res) => {
+      const p = await prepareDigest(rf, { ai: req.query.ai === '1', baseUrl: origin(req) });
+      res.json({ subject: p.rendered.subject, html: p.rendered.html, text: p.rendered.text, data: p.data });
+    }),
+  );
+  api.post(
+    '/digest/send',
+    wrap(async (req, res) =>
+      res.json(await sendDigest(rf, { trigger: 'manual', ai: req.body?.ai !== false, baseUrl: origin(req) })),
     ),
+  );
+  api.get('/digest/:id/html', (req, res) => {
+    const html = rf.state.getDigestHtml(Number(req.params.id));
+    if (!html) return res.status(404).end();
+    res.type('html').send(html);
+  });
+
+  app.use('/api', api);
+  serveDashboard(app, opts.dashboardDir);
+
+  // Scheduled actions (held for quiet hours) run when their time comes; the digest goes out once a day.
+  timers.push(
+    setInterval(() => {
+      void rf.runDue().catch((e) => rf.log.warn(`scheduled actions failed: ${(e as Error).message}`));
+      void runScheduledDigest(rf).catch((e) => rf.log.warn(`digest failed: ${(e as Error).message}`));
+    }, 60000),
   );
 
   if (opts.watch) {
@@ -372,4 +454,37 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
       for (const t of timers) clearInterval(t);
     },
   };
+}
+
+function safeEqual(a: string, b: string) {
+  return a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+/** HTTP basic auth for the console when RETROFIT_DASHBOARD_PASSWORD is set (any user name). */
+export function basicAuth(): express.RequestHandler | null {
+  const password = process.env.RETROFIT_DASHBOARD_PASSWORD;
+  if (!password) return null;
+  return (req: Request, res: Response, next: NextFunction) => {
+    const [scheme, value] = (req.header('authorization') ?? '').split(' ');
+    const [, given] = scheme === 'Basic' && value ? Buffer.from(value, 'base64').toString().split(':') : [];
+    if (given !== undefined && safeEqual(given, password)) return next();
+    res.setHeader('WWW-Authenticate', 'Basic realm="paypal-retrofit", charset="UTF-8"');
+    res.status(401).send('Authentication required');
+  };
+}
+
+/** Serves the built console (single-page app), or a hint to build it. */
+export function serveDashboard(app: express.Express, dir = DEFAULT_DASHBOARD_DIR) {
+  if (fs.existsSync(path.join(dir, 'index.html'))) {
+    app.use(express.static(dir, { index: false, maxAge: '1h' }));
+    app.get('*', (req, res, next) =>
+      req.path.startsWith('/api') ? next() : res.sendFile(path.join(dir, 'index.html')),
+    );
+  } else {
+    app.get('/', (_req, res) =>
+      res
+        .type('text/plain')
+        .send('paypal-retrofit API is running. Build the dashboard with "pnpm build" to get the UI.'),
+    );
+  }
 }

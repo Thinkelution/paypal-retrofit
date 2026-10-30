@@ -10,7 +10,7 @@ Most small businesses already run on something: an old invoicing app, a booking 
 
 ## What it does
 
-paypal-retrofit is an SDK, CLI and web console. Point it at a SQLite or Postgres database, or a folder of CSV exports. Claude maps the schema to PayPal objects (customers, catalog products, invoices with line items, recurring agreements) and explains every choice. One sync sends open invoices through PayPal Invoicing with the business's own invoice numbers and writes the pay links back. Verified webhooks write payments back into the legacy system; a reconciler repairs anything a lost webhook missed and flags mismatches such as invoices marked paid by hand but still open in PayPal. An Ops agent answers receivables questions and proposes reminders, recorded payments, refunds and subscriptions, and a Support agent drafts dispute responses from the invoice records. Every side effect passes through a policy the owner sets: auto, confirm or never.
+paypal-retrofit is an SDK, CLI and web console, plus a no-code setup wizard, an owner's morning digest and an MCP server. Point it at a SQLite or Postgres database, or a folder of CSV exports. Claude maps the schema to PayPal objects (customers, catalog products, invoices with line items, recurring agreements) and explains every choice. One sync sends open invoices through PayPal Invoicing with the business's own invoice numbers and writes the pay links back. Verified webhooks write payments back into the legacy system; a reconciler repairs anything a lost webhook missed and flags mismatches such as invoices marked paid by hand but still open in PayPal. An Ops agent answers receivables questions and proposes reminders, recorded payments, refunds and subscriptions, and a Support agent drafts dispute responses from the invoice records. Every side effect passes through a policy the owner sets: auto, confirm or never.
 
 ### Built for how small businesses actually get paid
 
@@ -21,9 +21,15 @@ paypal-retrofit is an SDK, CLI and web console. Point it at a SQLite or Postgres
 - **Risk and cash forecast.** Late-payment risk per invoice and a 9-week forecast, learned from the business's own payment history and explained factor by factor.
 - **Month-end close.** A payments ledger with gross, PayPal fee and net, exported for Xero or QuickBooks so the books match the payout.
 
+### More than an SDK
+
+- **No-code setup wizard.** Upload CSV exports (or connect SQLite / Postgres locally), let Claude map them, set the rules in plain words, preview exactly what the first sync will send, and go live. The running server switches to the new business without a restart.
+- **Owner's morning digest.** Email or Slack every weekday: what came in (gross, fees, net), what is overdue, what waits for approval, who to call, what is at risk. Each waiting action has a signed, expiring Review link that opens an Approve / Reject page.
+- **MCP server.** `paypal-retrofit mcp` (stdio) or `POST /mcp` (Streamable HTTP) gives Claude Desktop, Claude Code or any MCP client the same tools and the same policy gate as the built-in Ops agent, with prompts such as `morning_briefing` and `chase_overdue`.
+
 ## How we built it
 
-- TypeScript monorepo: engine (`core`), agents, Express server, React console, CLI, and a local PayPal mock for offline tests.
+- TypeScript monorepo: engine (`core`), agents, MCP server (official `@modelcontextprotocol/sdk`), Express server with the setup wizard API and digest delivery, React console, CLI, and a local PayPal mock for offline tests.
 - PayPal: Invoicing v2 (create, send, remind, cancel, record payment/refund, search), Payments v2 capture refunds, Catalog Products, Billing Plans and Subscriptions, Webhooks (create, verify signature, 15 event types), Disputes, Transaction Search, and the **PayPal Agent Toolkit**, whose read tools are bridged into Claude's tool runner.
 - AI: Claude (`claude-opus-5-5`) through the official Anthropic SDK. Structured outputs for the Mapper and Support agents; the SDK tool runner for the Ops agent; server-side refusal fallback; masked personal data; read-only SQL.
 - AG Grid Community for every table in the console, including editable mapping grids. Render Blueprint for hosting.
@@ -42,7 +48,7 @@ Late fees and early-payment discounts as policy, customer statements, multi-curr
 
 ## Earlier ideas still on the list
 
-More sources (MySQL, Google Sheets, QuickBooks exports), Orders-based checkout links for one-off sales, an MCP server so buyer agents can discover a retrofitted catalogue, and a hosted multi-tenant version.
+More sources (MySQL, Google Sheets, QuickBooks exports), Orders-based checkout links for one-off sales, buyer-facing MCP tools so shoppers' agents can discover a retrofitted catalogue, and a hosted multi-tenant version.
 
 ## Built with
 
@@ -50,7 +56,7 @@ TypeScript, Node.js, Express, React, Vite, AG Grid, SQLite, PostgreSQL, PayPal R
 
 ## Tools used (AI)
 
-Anthropic Claude (`claude-opus-5-5`) via the official `@anthropic-ai/sdk`: (1) the Mapper agent turns a database schema into a typed PayPal mapping with structured outputs; (2) the Ops agent uses the SDK tool runner with retrofit's engine tools and PayPal Agent Toolkit read tools; (3) the Support agent drafts dispute responses with structured outputs. Claude Code was used as a development assistant.
+Anthropic Claude (`claude-opus-5-5`) via the official `@anthropic-ai/sdk`: (1) the Mapper agent turns a database schema into a typed PayPal mapping with structured outputs; (2) the Ops agent uses the SDK tool runner with retrofit's engine tools and PayPal Agent Toolkit read tools; (3) the Support agent drafts dispute responses with structured outputs; (4) the reminder and digest writers draft customer reminders and the owner's morning note; (5) the MCP server lets the owner's own Claude (Desktop or Code) use the same tools under the same rules. Claude Code was used as a development assistant.
 
 ## Links
 

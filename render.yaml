@@ -17,6 +17,12 @@ services:
         sync: false
       - key: RETROFIT_MODEL
         value: claude-opus-5-5
+      # Approval links in the digest stay valid across restarts of the temporary disk.
+      - key: RETROFIT_LINK_SECRET
+        generateValue: true
+      # Bearer token for the MCP endpoint when the console has a password.
+      - key: RETROFIT_MCP_TOKEN
+        sync: false
 
   # Optional: the same demo against the real PayPal sandbox.
   # Uncomment, then set the PayPal secrets in the Render dashboard.

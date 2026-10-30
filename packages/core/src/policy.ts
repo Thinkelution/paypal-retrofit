@@ -102,7 +102,7 @@ export function decidePolicy(
 
 // ---------------------------------------------------------------- time helpers
 
-function localParts(d: Date, timeZone: string) {
+export function localParts(d: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
     hour12: false,

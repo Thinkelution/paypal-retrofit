@@ -1,0 +1,21 @@
+{
+  "name": "@paypal-retrofit/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server for paypal-retrofit: ask Claude Desktop, Claude Code or any MCP client about receivables and queue actions under the owner's rules.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@paypal-retrofit/agents": "workspace:*",
+    "@paypal-retrofit/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@paypal-retrofit/mock-paypal": "workspace:*",
+    "express": "^4.21.1",
+    "fernhill-legacy-invoicer": "workspace:*"
+  }
+}

@@ -105,7 +105,8 @@ export interface Config {
   actionKinds: string[];
   policies: Record<string, string>;
   source: { kind: string };
-  demo: { legacyAppPath: string; mockPath: string } | null;
+  demo: { legacyAppPath: string; mockPath: string; custom: boolean } | null;
+  mcpPath: string;
   webhookConfigured: boolean;
   controls: {
     rules: Array<{ kind: string; mode: string; maxAmount?: number; minAmount?: number; note?: string }>;
@@ -206,6 +207,93 @@ export interface MonthSummary {
   effectiveFeeRate: number | null;
 }
 
+export interface SetupStatus {
+  configured: boolean;
+  canSetup: boolean;
+  allowServerPaths: boolean;
+  environment: string;
+  paypalCredentials: boolean;
+  claude: boolean;
+  model: string;
+  smtp: boolean;
+  slack: boolean;
+  samples: string[];
+}
+
+export interface SchemaView {
+  source: string;
+  tables: Array<{ name: string; rows: number; columns: string[]; enums: Record<string, string[]> }>;
+}
+
+export interface SetupControls {
+  newInvoices: 'auto' | 'confirm';
+  refundsAutoUpTo: number;
+  refundsPerDay: number;
+  remindersPerDay: number;
+  quietHours: { enabled: boolean; start: string; end: string; weekends: boolean };
+  timezone: string;
+  collections: { friendly: number; firm: number; final: number };
+}
+
+export interface SetupPreview {
+  byKind: Record<string, number>;
+  items: Array<{ kind: string; label: string; reason: string; policy: string }>;
+  skipped: Array<{ label: string; reason: string }>;
+  skippedTotal: number;
+  invoices: {
+    total: number;
+    open: number;
+    openAmount: number;
+    toSend: number;
+    toSendAmount: number;
+    sample: Array<{
+      number: string;
+      customer: string;
+      email: string;
+      total: number;
+      due: string | null;
+      status: string;
+      lines: number;
+    }>;
+  };
+  currency: string;
+}
+
+export interface DigestDelivery {
+  channel: string;
+  status: 'sent' | 'failed' | 'skipped';
+  detail: string;
+}
+
+export interface DigestInfo {
+  schedule: {
+    enabled: boolean;
+    time: string;
+    timezone: string;
+    weekdaysOnly: boolean;
+    lastSentAt: string | null;
+    nextAt: string | null;
+  };
+  channels: {
+    email: { configured: boolean; to: string[]; from: string | null; reason: string | null };
+    slack: { configured: boolean };
+  };
+  history: Array<{
+    id: number;
+    createdAt: string;
+    trigger: string;
+    subject: string;
+    deliveries: DigestDelivery[];
+  }>;
+}
+
+export interface DigestPreview {
+  subject: string;
+  html: string;
+  text: string;
+  data: { note?: string; headline: string; approvalsTotal: number };
+}
+
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const r = await fetch(url, {
     method,
@@ -256,6 +344,33 @@ export const api = {
   insights: () => req<Insights>('GET', '/api/insights'),
   monthSummary: (month: string) => req<MonthSummary>('GET', `/api/month-summary?month=${month}`),
   journalUrl: (month: string, format: string) => `/api/export/journal.csv?month=${month}&format=${format}`,
+  digest: () => req<DigestInfo>('GET', '/api/digest'),
+  digestPreview: (ai: boolean) => req<DigestPreview>('GET', `/api/digest/preview${ai ? '?ai=1' : ''}`),
+  sendDigest: (ai: boolean) =>
+    req<{ id: number; subject: string; deliveries: DigestDelivery[] }>('POST', '/api/digest/send', { ai }),
+  digestHtmlUrl: (id: number) => `/api/digest/${id}/html`,
+  setup: {
+    status: () => req<SetupStatus>('GET', '/api/setup/status'),
+    source: (body: unknown) =>
+      req<{ id: string; label: string; schema: SchemaView }>('POST', '/api/setup/sources', body),
+    map: (id: string, body: { ai: boolean; currency?: string; timezone: string }) =>
+      req<{ mapping: any; issues: any[]; warnings: string[]; engine: string }>(
+        'POST',
+        `/api/setup/sources/${id}/map`,
+        body,
+      ),
+    mapping: (id: string) => req<{ mapping: any; schema: any }>('GET', `/api/setup/sources/${id}/mapping`),
+    saveMapping: (id: string, m: unknown) => req<any>('PUT', `/api/setup/sources/${id}/mapping`, m),
+    preview: (id: string, controls: SetupControls) =>
+      req<SetupPreview>('POST', `/api/setup/sources/${id}/preview`, { controls }),
+    finish: (id: string, body: unknown) =>
+      req<{ ok: boolean; configPath: string; synced: { executed: number; pending: number } | null }>(
+        'POST',
+        `/api/setup/sources/${id}/finish`,
+        body,
+      ),
+    sampleUrl: (f: string) => `/api/setup/samples/${encodeURIComponent(f)}`,
+  },
 };
 
 export type AgentEvent =

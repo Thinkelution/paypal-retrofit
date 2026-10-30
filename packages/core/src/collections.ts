@@ -49,6 +49,15 @@ function snippet(notes: string, keywords: string[]) {
   return k ? notes.trim().slice(0, 80) : null;
 }
 
+const COMPANY_WORDS =
+  /\b(inc|llc|ltd|limited|co|corp|company|group|studio|apartments?|residence|school|cafe|bakery|brewing|dental|fitness|florist|spa|yoga|theater|management|mgmt|property|services?|partners|associates|hub|clinic|shop|store|restaurant|hotel|agency)\b|[&()]/i;
+
+/** "Hi Maya," for a person; "Hi there," when the customer name is a business. */
+export function greetingName(name: string): string {
+  if (!name || COMPANY_WORDS.test(name)) return 'there';
+  return splitName(name).given_name.split(' ')[0] || 'there';
+}
+
 export async function planCollections(rf: Retrofit, today = todayIso()): Promise<CollectionItem[]> {
   const cfg = rf.mapping.collections;
   const steps = [...cfg.steps].sort((a, b) => a.afterDaysOverdue - b.afterDaysOverdue);
@@ -79,7 +88,7 @@ export async function planCollections(rf: Retrofit, today = todayIso()): Promise
       legacyPk: inv.pk,
       number: inv.number,
       customer: inv.customer?.name ?? `#${inv.customerPk}`,
-      customerFirstName: splitName(inv.customer?.name ?? '').given_name.split(' ')[0] || 'there',
+      customerFirstName: greetingName(inv.customer?.name ?? ''),
       amountDue,
       due: inv.due ?? null,
       daysOverdue,

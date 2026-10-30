@@ -16,7 +16,9 @@
 | `core/ledger` | Joined legacy ↔ PayPal view and totals used by the console and the agents. |
 | `core/state` | SQLite state store: `links`, `events`, `actions`, `discrepancies`, `meta`. |
 | `agents` | Mapper (structured outputs), Ops (SDK tool runner), Support (structured outputs); tools for the engine and the PayPal Agent Toolkit bridge. |
-| `server` | Express: `/webhooks/paypal`, `/api/*`, SSE `/api/stream`, static console, optional basic auth. |
+| `server` | Express: `/webhooks/paypal`, `/api/*`, SSE `/api/stream`, `/mcp`, `/a/:token` approval pages, static console, optional basic auth. `host` wraps it so the active workspace can change at runtime (setup wizard); `setup` is the wizard's API; `digest` delivers the owner's digest. |
+| `mcp` | MCP server over the engine tools: stdio (`paypal-retrofit mcp`) and stateless Streamable HTTP, with prompts and resources. |
+| `core/digest` | Builds the owner's digest, renders it as HTML email, text and Slack Block Kit, signs and verifies approval-link tokens, decides when the scheduled digest is due. |
 | `cli` | Commander CLI; `demo` mounts mock PayPal and Fernhill next to the console. |
 | `mock-paypal` | In-memory PayPal stand-in with signed webhooks and buyer pages; used by tests and the offline demo. |
 
@@ -26,6 +28,14 @@
 2. **sync**: read invoices whose legacy status is in `push`, plus already-linked ones → plan (`create_invoice`, `send_invoice`, `update_invoice`, `cancel_invoice`, `record_payment`, `create_subscription`) → each plan item becomes an action → policy decides → execute → write back.
 3. **payment**: buyer pays → PayPal sends `PAYMENT.CAPTURE.COMPLETED` / `INVOICING.INVOICE.PAID` → verify signature → store event once → re-read the invoice from PayPal (never trust the payload alone) → write `status`, `paid_at`, `paid_amount` to the legacy row → 200.
 4. **reconcile** (every 5 minutes in `serve`, on demand): re-read every linked invoice, apply its state (repairs missed webhooks), and open/close discrepancies.
+
+## Setup wizard and workspaces
+
+`createHost` holds the active `Retrofit` and its Express app. Before a config exists it serves only the console (which shows the wizard) and `/api/setup/*`. A setup session copies or receives CSVs into its own workspace folder (or records a SQLite path / Postgres URL when the server allows it), introspects it, asks the Mapper for a mapping, and previews `plan()` against an in-memory state store and a dummy PayPal client. `finish` writes the config and mapping and calls `activate`, which builds a new engine and server, stops the old one's timers and closes it. On `serve` the config goes where `-c` points and setup closes once configured; on the demo every wizard run gets its own workspace and invoice-number prefix, and **Reset demo** re-activates Fernhill.
+
+## Owner's digest
+
+`buildDigest` reads payments since the last digest (`meta.digest.lastSentAt`), pending and scheduled actions, the collections plan, risk, forecast and discrepancies. `renderDigest` produces the email (table layout, inline styles), text and Slack blocks. Approval links are `/a/<base64url(id.expiry)>.<HMAC-SHA256 prefix>` signed with `RETROFIT_LINK_SECRET` or a secret kept in the state store; GET shows the action, POST approves or rejects through `Retrofit.approve` / `reject`. Each send is recorded in the `digests` table with per-channel results. The server checks every minute whether the digest is due (business time zone, weekdays, at most once per local day, within three hours of the set time).
 
 ## Payment plans
 
@@ -77,6 +87,7 @@ discrepancies(id, entity, legacy_pk, paypal_id, kind, detail, suggestion, detect
 meta(key, value)
 plans(legacy_pk, paypal_id, installments, installment_amount, total, schedule, status, created_at, updated_at)
 payments(id, entity, legacy_pk, paypal_id, kind, gross, fee, net, currency, method, occurred_at, recorded_at)
+digests(id, created_at, trigger, subject, deliveries, html, text)
 ```
 
 ## Security notes
@@ -86,3 +97,5 @@ payments(id, entity, legacy_pk, paypal_id, kind, gross, fee, net, currency, meth
 - Agent SQL is checked to be a single SELECT/WITH and runs on a read-only connection or read-only transaction.
 - The console can be protected with HTTP basic auth (`RETROFIT_DASHBOARD_PASSWORD`); the webhook and health endpoints stay public.
 - `PRODUCTION` is refused unless `RETROFIT_ALLOW_LIVE=1`.
+- The setup wizard never accepts PayPal or Anthropic secrets; on the public demo it accepts only CSV uploads (5 MB, 12 files) and the sample, never server paths.
+- Approval links expire after 48 hours, are bound to one action, and do nothing on GET. `/mcp` requires `RETROFIT_MCP_TOKEN` when the console has a password; MCP approvals are off unless enabled.

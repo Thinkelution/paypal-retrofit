@@ -113,6 +113,35 @@ const SHOTS = [
   { file: 'webhooks.png', url: '/#activity', w: 1440, h: 760 },
   { file: 'legacy.png', url: '/fernhill/', w: 1280, h: 800, scheme: 'light' },
   { file: 'mobile.png', url: '/', w: 390, h: 844, mobile: true },
+  { file: 'digest.png', url: '/#digest', w: 1440, h: 1000 },
+  { file: 'mcp.png', url: '/', w: 1440, h: 900, clicks: ['Connect Claude (MCP)'] },
+  {
+    file: 'setup-rules.png',
+    url: '/#setup',
+    w: 1440,
+    h: 1000,
+    clicks: [
+      'Try the sample business',
+      'Read my data',
+      'Next: Check the mapping',
+      'Map my data',
+      'Next: Set your rules',
+    ],
+  },
+  {
+    file: 'setup.png',
+    url: '/#setup',
+    w: 1440,
+    h: 1000,
+    clicks: [
+      'Try the sample business',
+      'Read my data',
+      'Next: Check the mapping',
+      'Map my data',
+      'Next: Set your rules',
+      'Next: Preview and go live',
+    ],
+  },
 ];
 
 try {
@@ -137,6 +166,7 @@ try {
       deviceScaleFactor: s.mobile ? 2 : 1,
       mobile: !!s.mobile,
     });
+    await page.send('Emulation.setTimezoneOverride', { timezoneId: 'America/Los_Angeles' });
     await page.send('Emulation.setEmulatedMedia', {
       features: [{ name: 'prefers-color-scheme', value: s.scheme ?? 'dark' }],
     });
@@ -166,6 +196,17 @@ try {
       }
       await sleep(1200);
     }
+    // Click through buttons and labels by their text (the setup wizard, dialogs).
+    for (const text of s.clicks ?? []) {
+      await page.send('Runtime.evaluate', {
+        expression: `(() => {
+          const el = [...document.querySelectorAll('button, label, a')].find((e) => e.innerText.trim().startsWith(${JSON.stringify(text)}));
+          el?.click();
+        })()`,
+      });
+      await sleep(1500);
+    }
+    if (s.clicks) await page.send('Runtime.evaluate', { expression: 'window.scrollTo(0, 0)' });
     const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(out, s.file), Buffer.from(data, 'base64'));
     console.log(`${s.file}  ${s.w}x${s.h}`);
