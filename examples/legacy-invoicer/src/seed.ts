@@ -38,6 +38,61 @@ const CUSTOMERS: Array<[string, string, string, string, string, string]> = [
   ['Marcus Bell', 'marcus.bell@example.com', '120 River Pkwy', 'Tacoma', 'WA', '98401'],
 ];
 
+/**
+ * What the studio owes the people it works with: [bill, payee, PayPal email, what for, amount, due in days,
+ * status]. Pixel & Pine's latest bill gives a new PayPal email, and Sam Rivera has never been paid before.
+ */
+const BILLS: Array<[string, string, string, string, number, number, 'open' | 'paid' | 'void']> = [
+  ['B-201', 'Jordan Avery', 'jordan.avery@example.com', 'Second shooter, Whitaker wedding', 350, -24, 'paid'],
+  [
+    'B-202',
+    'Pixel & Pine Retouching',
+    'studio@pixelpine.example.com',
+    'Retouching, 40 images',
+    216,
+    -38,
+    'paid',
+  ],
+  [
+    'B-203',
+    'Northside Print Lab',
+    'billing@northside-print.example.com',
+    'Archival prints, October',
+    480,
+    5,
+    'open',
+  ],
+  ['B-204', 'Jordan Avery', 'jordan.avery@example.com', 'Second shooter, Reyes engagement', 175, 2, 'open'],
+  [
+    'B-205',
+    'Pixel & Pine Retouching',
+    'pixelpine.payments@example.net',
+    'Retouching, 25 images',
+    135,
+    7,
+    'open',
+  ],
+  ['B-206', 'Sam Rivera', 'sam.rivera@example.com', 'Studio assistant, 6 hours', 120, 10, 'open'],
+  [
+    'B-207',
+    'Lumen Lighting Rentals',
+    'rentals@lumen.example.com',
+    'Light kit rental (returned unused)',
+    95,
+    -40,
+    'void',
+  ],
+  [
+    'B-208',
+    'Northside Print Lab',
+    'billing@northside-print.example.com',
+    'Archival prints, September',
+    312,
+    -30,
+    'paid',
+  ],
+];
+
 /** Customers who habitually pay late (Daniel Reyes, Tom Whitaker, Kofi Mensah). */
 const LATE_PAYERS = new Set([2, 4, 6]);
 
@@ -75,7 +130,7 @@ export function seed(opts: SeedOptions = {}) {
 /** Replaces all rows in an open database (used by the hosted demo's reset button). */
 export function seedInto(db: Database.Database, opts: Omit<SeedOptions, 'file'> = {}) {
   db.exec(
-    `DELETE FROM invoice_items; DELETE FROM invoices; DELETE FROM retainers; DELETE FROM services; DELETE FROM customers;`,
+    `DELETE FROM invoice_items; DELETE FROM invoices; DELETE FROM retainers; DELETE FROM services; DELETE FROM customers; DELETE FROM bills;`,
   );
   if (db.prepare(`SELECT name FROM sqlite_master WHERE name='sqlite_sequence'`).get())
     db.exec(`DELETE FROM sqlite_sequence`);
@@ -94,6 +149,9 @@ export function seedInto(db: Database.Database, opts: Omit<SeedOptions, 'file'> 
   );
   const insRetainer = db.prepare(
     `INSERT INTO retainers (customer_id,title,monthly_fee,start_date,status) VALUES (?,?,?,?,?)`,
+  );
+  const insBill = db.prepare(
+    `INSERT INTO bills (bill_no,payee,payee_email,description,amount,due_on,status,paid_on) VALUES (?,?,?,?,?,?,?,?)`,
   );
 
   db.transaction(() => {
@@ -166,6 +224,17 @@ export function seedInto(db: Database.Database, opts: Omit<SeedOptions, 'file'> 
     insRetainer.run(10, 'Event coverage retainer', 900, iso(addDays(today, -30)), 'active');
     insRetainer.run(4, 'Social content package', 350, iso(addDays(today, -5)), 'pending');
     insRetainer.run(2, 'Quarterly headshot refresh', 220, iso(addDays(today, -120)), 'cancelled');
+    for (const [no, payee, email, what, amount, dueIn, status] of BILLS)
+      insBill.run(
+        no,
+        payee,
+        email,
+        what,
+        amount,
+        iso(addDays(today, dueIn)),
+        status,
+        status === 'paid' ? iso(addDays(today, dueIn - 2)) : null,
+      );
   })();
 }
 

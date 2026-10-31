@@ -4,6 +4,8 @@
 
 It is also a product an owner can use without a developer: a **no-code setup wizard**, a **morning digest** by email or Slack with one-click approvals, and an **MCP server** so Claude Desktop, Claude Code or any MCP client can run receivables under the same rules. Their customers get a **self-service portal**, statements and **autopay**; new buyers, **AI shopping agents** and **customers' own assistants** can buy and pay through PayPal checkout; **late fees and early-payment discounts** run as owner rules; and a **bookkeeper** can run every client from one screen.
 
+It shows its work, so it can be trusted with more of the job: every invoice has a **money trail**, the owner's rules are written in **plain English** and previewed before they apply, and **shadow mode** replays the last 90 days before anything goes live. An **inbox agent** reads customer emails, customers' assistants can **agree payment plans** inside the owner's limits, **dispute evidence** is drafted from the business's records and sent through PayPal once approved, **suppliers are paid with PayPal Payouts**, and any agent that speaks the open **Agentic Commerce Protocol** can check out.
+
 It is **plug and play**: one click to run it (Docker, GitHub Codespaces, Render); the back office it already has as the source (SQLite, Postgres, MySQL, CSV exports, an Excel workbook or a Google Sheet link); one script tag for PayPal on the business's existing website; and a console that opens on **Today**: what needs the owner, with one button each. New invoices can be typed, said in a sentence, or **snapped from a paper job sheet**.
 
 > Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/) (October–November 2026). MIT licensed. Website: <https://thinkelution.github.io/paypal-retrofit/>
@@ -77,6 +79,33 @@ Beyond connecting PayPal, retrofit runs the receivables work a careful bookkeepe
 | **Month-end close** | A payments ledger with gross, PayPal fee and net per payment. Exports as CSV, a Xero bank statement or a QuickBooks bank upload. |
 
 ![Collections playbook](site/assets/collections.png)
+
+## An agent you can trust with more
+
+The more an agent does with money, the more the owner needs to see why, change the rules in their own words, and try it on their own history first. Every item below runs through the same policy gate; the hard rules (an email can never move money on its own, dispute evidence always waits for the owner, a new payee or a changed PayPal email always waits) cannot be loosened by any setting.
+
+| | What it does |
+| --- | --- |
+| **Money trail** | Every invoice (and bill) shows its whole story in order: who proposed each action and which rule let it run or made it wait, each verified PayPal webhook, payments and fees, customer requests and emails, and exactly which columns retrofit wrote into the business's own system. In the invoice drawer, and as the `money_trail` tool for Claude. |
+| **Rules in plain English** | "Refunds over $200 need me. Never chase schools before the 20th. No reminders after 7pm or at weekends. Bills up to $500 run on their own." Claude (or patterns, without a key) turns sentences into rules, says what it could not do, and **previews what changes today**: which reminders would now be held, which late fees added or dropped, which waiting actions would run on their own. Nothing is saved until the owner says so. |
+| **Shadow mode** | Replays the last 30 to 180 days of the business's own invoices through the current rules without touching PayPal or the data: invoices that would have gone out with a pay link, every reminder and late fee (and which would have waited for the owner), and an estimate of how much money would have arrived sooner, with the assumption stated. Change a rule, replay again. |
+| **Inbox agent** | Customers email the business: "I'll pay by Friday", "I posted a cheque on Monday", "can I split it into three?", "this is wrong". Each email becomes what the owner would have done by hand: a promise that holds reminders, a plan request, a question that pauses chasing, a statement to send, a payment to record, plus a drafted reply. Paste one in the console or point a mail provider's inbound webhook at `/inbound/email`. Anything that moves money waits for the owner, because an email can be forged. |
+| **Assistant-to-assistant plans** | A customer's AI assistant asks for a payment plan over MCP (`propose_payment_plan`). Inside the owner's plan limits it is agreed on the spot and the PayPal invoice takes instalments; outside them the business's side makes a counter-offer the assistant can accept; anything else waits for the owner. |
+| **Dispute evidence autopilot** | When a buyer opens a PayPal dispute, retrofit gathers what the records say (the invoice and its lines, when it was sent, reminded and paid, what the customer wrote), Claude drafts the response and picks the evidence type, and once the owner approves, PayPal gets the notes and a **PDF of the records** through the Disputes API (`provide-evidence`). It never claims what the records do not show: proof of delivery is listed as missing instead. |
+| **Pay suppliers with PayPal Payouts** | Bills in the business's own system (contractors, labs, rentals) are paid to each payee's PayPal email, one approval per bill. The amount always comes from the bill; PayPal refuses a second batch for the same approval; a bill edited after approval is not paid; the bill is marked paid in the business's system only when PayPal confirms the money arrived, and an unclaimed payout is flagged. |
+| **Open checkout standard (ACP)** | Any AI agent that speaks the **Agentic Commerce Protocol** can buy from the catalogue: discovery at `/.well-known/acp.json`, checkout sessions at `/acp/checkout_sessions` (create, update, retrieve, complete, cancel; idempotency keys, integer minor units, flat errors) and the same five tools over MCP at `/acp/mcp`. Payment is a PayPal handler: the buyer approves a PayPal order, the agent completes the session. See [docs/ACP.md](docs/ACP.md). |
+
+| Disputes: evidence from the records | Bills paid with PayPal Payouts |
+| --- | --- |
+| ![Dispute response drafted from Fernhill's records, waiting for approval](site/assets/disputes.png) | ![Bills to pay, with a changed PayPal email flagged](site/assets/bills.png) |
+
+| Rules in plain English | Shadow mode |
+| --- | --- |
+| ![Rules typed in plain English with a preview of what changes](site/assets/rules.png) | ![Shadow mode replaying 90 days of invoices](site/assets/shadow.png) |
+
+| Inbox agent | Money trail |
+| --- | --- |
+| ![A customer email read and acted on](site/assets/inbox.png) | ![The money trail of one invoice](site/assets/trail.png) |
 
 ## More than an SDK
 
@@ -230,8 +259,9 @@ claude mcp add --transport http fernhill-shop http://localhost:8787/mcp/shop
 | Invoicing QR codes | `generate-qr-code` for pay slips on paper invoices and job sheets |
 | Payments v2 | capture refund; capture fees for the payments ledger |
 | Catalog Products v1, Subscriptions v1 | product, plan and subscription creation, status, cancel |
-| Webhooks v1 | create webhook, list, verify signature; 19 event types (invoice paid/cancelled/refunded, captures, checkout orders, subscriptions, sales, disputes, vault payment tokens) |
-| Disputes v1 | list, get, accept claim (policy `never` by default) |
+| Webhooks v1 | create webhook, list, verify signature; 29 event types (invoice paid/cancelled/refunded, captures, checkout orders, subscriptions, sales, disputes, vault payment tokens, payouts batches and items) |
+| Disputes v1 | list, get, **provide evidence** (multipart: the response as notes plus a PDF of the business's records), **send message** (inquiry stage), accept claim (policy `never` by default) |
+| **Payouts v1** | create batch payout (one item per approved bill, `sender_batch_id` per approval), show batch, show item; `PAYMENT.PAYOUTS-ITEM.*` webhooks mark the bill paid or flag an unclaimed payout |
 | Transaction Search | PayPal fees for the payments ledger when a capture webhook was missed; agent tool |
 | **PayPal Agent Toolkit** (`@paypal/agent-toolkit`) | Supplies the Ops agent's read-only PayPal tools (invoices, disputes, transactions, insights, subscriptions, plans, products) in sandbox and production. Writes are deliberately not exposed to the agent. |
 
@@ -242,7 +272,9 @@ claude mcp add --transport http fernhill-shop http://localhost:8787/mcp/shop
 | **Mapper** | Claude (`claude-opus-5-5`) via the official `@anthropic-ai/sdk`, structured outputs | Reads the masked schema and proposes a typed mapping with rationale, confidence and warnings. The result is validated against the real schema; if it fails, retrofit falls back to its deterministic mapper. |
 | **Ops** | Claude via the SDK tool runner | Answers receivables questions using the ledger, read-only SQL on the legacy database, PayPal Agent Toolkit tools, the collections plan, payment risk, customer history, the cash forecast and month-end figures. Acts only through `propose_action` and `run_collections`, which the policy engine decides. |
 | **Invoice reader** | Claude, vision + structured outputs | Turns a sentence or a photo of a paper job sheet, quote or receipt into an invoice draft, matched against the business's own customers and catalogue. Never invents prices or emails; lists anything unclear (a smudged figure, a missing email) for the owner to check. Sentences fall back to a rule-based reader. |
-| **Support** | Claude, structured outputs | Drafts a dispute response and evidence checklist from the PayPal dispute and the legacy invoice. Text only; the owner submits it. |
+| **Support** | Claude, structured outputs | Drafts the response to a buyer dispute from the evidence pack (the invoice, its lines, the money trail, the customer's emails), recommends contest, partial refund or accept, and picks the PayPal evidence type. Told never to invent delivery or evidence. The owner edits and approves; retrofit sends it with a PDF of the records. Without Claude a records-only draft is used. |
+| **Inbox reader** | Claude, structured outputs, low effort | Reads a customer email against their open and recently paid invoices: promise (with a date), plan, a payment made another way, statement, complaint, question; drafts the reply. Text in the email is treated as data, never instructions. Falls back to patterns. |
+| **Rules compiler** | Claude, structured outputs | Turns the owner's sentences into typed rule changes (approvals by amount, limits, quiet hours, customer rules, late fees, discounts, plan limits, reminder days) and lists what it cannot express. Falls back to patterns. |
 | **Reminder writer** | Claude, structured outputs, low effort | Writes each collections reminder in the requested tone from the invoice facts and the customer's payment history. Told never to threaten, mention fees or legal action, or invent facts. Falls back to templates. |
 | **Digest writer** | Claude, structured outputs, low effort | Writes the two or three opening sentences of the owner's digest from its facts: what came in and the one or two decisions that matter today. Falls back to a deterministic headline. |
 | **Your own Claude, over MCP** | Whatever model your MCP client uses | Claude Desktop or Claude Code gets the same tools and the same policy gate as the built-in Ops agent. |
@@ -274,11 +306,13 @@ Live (production) mode is refused unless `RETROFIT_ALLOW_LIVE=1`. It has not bee
 packages/core         engine: adapters (SQLite, Postgres, MySQL, CSV, Excel, Google Sheets), mapping,
                       PayPal client, sync, webhooks, reconcile, ledger, policy rules, collections,
                       payment plans, risk, forecast, journal, payment terms, statements, Orders checkout
-                      (portal, shop, agents), autopay (Vault), new invoices, QR codes, go-live, Today, digest
+                      (portal, shop, agents), autopay (Vault), new invoices, QR codes, go-live, Today, digest,
+                      money trail, inbox, plan negotiation, plain-English rules, shadow mode, dispute evidence
+                      (with a PDF writer), supplier payouts, Agentic Commerce Protocol checkout
 packages/agents       Claude agents: Mapper, Ops (tool runner + PayPal Agent Toolkit), invoice reader (vision),
-                      Support, reminder and digest writers
-packages/mcp          owner MCP server over the engine tools, and the public MCP server for shoppers'
-                      and customers' assistants
+                      Support, inbox reader, rules compiler, reminder and digest writers
+packages/mcp          owner MCP server over the engine tools, the public MCP server for shoppers'
+                      and customers' assistants, and ACP's MCP binding
 packages/server       Express API, webhook endpoint, SSE live updates, setup wizard API, digest delivery,
                       one-click approval pages, customer portal (autopay), shop, website widget, pay slips,
                       llms.txt, multi-client host; samples/ holds the Brightside Plumbing CSVs
@@ -293,10 +327,11 @@ examples/legacy-invoicer  Fernhill Studio, the legacy app
 ## Development
 
 ```bash
-pnpm test        # 55 tests: engine, webhooks, reconcile, CSV, Excel, Google Sheets, policies, quiet hours,
+pnpm test        # 64 tests: engine, webhooks, reconcile, CSV, Excel, Google Sheets, policies, quiet hours,
                  # plans, collections, payment terms, portal payments and requests, statements, autopay (Vault),
                  # new invoices (rules and Claude vision), website widget, QR, go-live, shop and customer
-                 # assistant MCP, multi-client,
+                 # assistant MCP, multi-client, money trail, shadow mode, inbox, plan negotiation,
+                 # plain-English rules, dispute evidence, payouts, ACP (REST and MCP),
                  # risk, forecast, fees, agents, digest + approval links, setup wizard, MCP (in-memory and HTTP)
                  # (offline, against the mock and a fake Messages API)
 pnpm typecheck
@@ -315,6 +350,8 @@ pnpm dashboard:dev   # Vite dev server on :5173, proxied to a running `retrofit 
 - Google Sheets are read through a share link, so retrofit cannot write back into the sheet itself; PayPal ids and payments live in retrofit and in a downloadable copy. MySQL is exercised by typecheck only, like Postgres.
 - Reading photos needs Claude (`ANTHROPIC_API_KEY`); vaulted (autopay) charges and the QR endpoint are tested against the mock, not yet the live sandbox.
 - Portal payments for several invoices are recorded on each PayPal invoice as a PayPal payment, so PayPal shows them as "marked as paid"; retrofit counts them as collected through PayPal.
+- Dispute evidence, Payouts and ACP are tested against the mock. PayPal takes evidence only while it offers the `provide-evidence` link (otherwise retrofit sends a message in the inquiry stage, or says to answer in the Resolution Center); live Payouts need Payouts enabled on the PayPal account.
+- ACP: Bearer tokens (`RETROFIT_ACP_TOKEN`) are checked; request signatures are not verified yet, and order webhooks to the agent are not sent. Shadow mode's money-sooner figure is an estimate with a stated assumption, not a forecast.
 
 ## License
 

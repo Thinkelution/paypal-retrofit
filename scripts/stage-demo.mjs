@@ -151,3 +151,34 @@ if (bright) {
     }
   }
 }
+
+// ---- the sixth pass: a supplier paid with PayPal Payouts, a customer email, an assistant's plan
+const bills = await call('/api/payables');
+const jordan = bills.bills?.find((b) => b.number === 'B-204');
+if (jordan) {
+  const { results } = await post('/api/payables/pay', { pks: [jordan.pk] });
+  const a = results[0]?.action;
+  if (a?.status === 'pending') await post(`/api/actions/${a.id}/approve`);
+  console.log(`payouts: ${jordan.number} to ${jordan.payee} (${jordan.amount}) sent through PayPal Payouts`);
+}
+const inbox = await call('/api/inbox');
+const promise = inbox.samples.find((m) => /by Friday/.test(m.text)) ?? inbox.samples[0];
+if (promise) {
+  const read = await post('/api/inbox', promise);
+  console.log(`inbox: ${promise.name ?? promise.from}: ${read.reading?.summary}`);
+}
+const fernCustomers = await call('/api/customers');
+const planner = fernCustomers.find((c) => c.name === 'Hana Sato') ?? fernCustomers.find((c) => c.openInvoices);
+if (planner?.portalUrl) {
+  const mine = await mcp('my_invoices', { portal_link: planner.portalUrl });
+  const inv = mine.invoices?.find((i) => i.payableOnline && !i.plan);
+  if (inv) {
+    const deal = await mcp('propose_payment_plan', {
+      portal_link: planner.portalUrl,
+      invoice: inv.number,
+      installments: 5,
+      agent: 'Claude',
+    });
+    console.log(`assistant plan: ${planner.name} asked 5 payments on ${inv.number}: ${deal.status}`);
+  }
+}

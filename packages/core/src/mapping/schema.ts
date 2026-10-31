@@ -81,6 +81,30 @@ export const SubscriptionMapping = z.object({
   writeBack: z.object({ paypalId: col.optional(), status: col.optional() }).default({}),
 });
 
+/** Money the business owes: contractor and supplier bills, paid to the payee's PayPal email with Payouts. */
+export const PayableMapping = z.object({
+  table: col,
+  pk: col,
+  fields: z.object({
+    number: col.optional(),
+    payee: col,
+    /** The payee's PayPal email. */
+    email: col,
+    amount: col,
+    due: col.optional(),
+    description: col.optional(),
+    status: col,
+  }),
+  statusMap: z.object({
+    open: z.array(z.string()),
+    paid: z.array(z.string()),
+    cancelled: z.array(z.string()).default([]),
+  }),
+  writeBack: z
+    .object({ status: col.optional(), paidAt: col.optional(), reference: col.optional() })
+    .default({}),
+});
+
 export const PolicyModeSchema = z.enum(['auto', 'confirm', 'never']);
 
 export const DEFAULT_POLICIES: Record<(typeof ACTION_KINDS)[number], z.infer<typeof PolicyModeSchema>> = {
@@ -94,6 +118,10 @@ export const DEFAULT_POLICIES: Record<(typeof ACTION_KINDS)[number], z.infer<typ
   create_subscription: 'confirm',
   cancel_subscription: 'confirm',
   accept_dispute: 'never',
+  // Always waits for the owner, whatever the policy says (see the engine).
+  submit_dispute_evidence: 'confirm',
+  // A first payment to a payee, or one to a changed PayPal email, always waits (see the engine).
+  pay_supplier: 'confirm',
   offer_payment_plan: 'confirm',
   apply_late_fee: 'confirm',
   expire_discount: 'auto',
@@ -171,6 +199,54 @@ export const PaymentTerms = z.object({
     .optional(),
 });
 
+/**
+ * A rule for some customers, written by the owner (often in plain English): which customers it covers, and
+ * how to treat them. Collections and late fees respect it.
+ */
+export const CustomerRule = z.object({
+  match: z
+    .object({
+      /** Customer keys. */
+      customers: z.array(z.string()).optional(),
+      /** Any of these words in the customer's name (case-insensitive), e.g. "school". */
+      nameContains: z.array(z.string().min(2)).optional(),
+      /** Email domains, e.g. "harborview.example". */
+      emailDomains: z.array(z.string().min(3)).optional(),
+    })
+    .refine((m) => Boolean(m.customers?.length || m.nameContains?.length || m.emailDomains?.length), {
+      message: 'A customer rule needs at least one way to match customers',
+    }),
+  /** No reminders before this day of the month (for example when they are paid on the 20th). */
+  noRemindersBeforeDay: z.number().int().min(2).max(28).optional(),
+  /** Never send reminders; the owner deals with them in person. */
+  noReminders: z.boolean().optional(),
+  noLateFees: z.boolean().optional(),
+  /** The owner's own words. */
+  note: z.string().optional(),
+});
+
+/**
+ * The payment plans the business will agree to when a customer (or their AI assistant) asks. Inside
+ * `autoAccept` a plan is agreed on the spot; inside the outer limits it waits for the owner; beyond them the
+ * customer gets a counter-offer.
+ */
+export const PlanPolicy = z.object({
+  maxInstallments: z.number().int().min(2).max(12).default(4),
+  /** Longest gap between payments. */
+  maxIntervalDays: z.number().int().min(7).max(92).default(30),
+  /** Latest first payment, in days from today. */
+  maxDaysToFirstPayment: z.number().int().min(0).max(60).default(14),
+  autoAccept: z
+    .object({
+      /** Balance up to which a plan can be agreed without the owner. */
+      maxAmount: z.number().nonnegative().default(1500),
+      maxInstallments: z.number().int().min(2).max(12).default(3),
+      /** Share of past invoices the customer paid on time (customers with no history wait for the owner). */
+      minOnTimeRate: z.number().min(0).max(1).default(0.5),
+    })
+    .default({}),
+});
+
 /** Agentic commerce: a catalogue from the product table that buyers' agents can check out through PayPal Orders. */
 export const Commerce = z.object({
   enabled: z.boolean().default(false),
@@ -189,6 +265,7 @@ export const RetrofitMapping = z.object({
     product: ProductMapping.optional(),
     invoice: InvoiceMapping,
     subscription: SubscriptionMapping.optional(),
+    payable: PayableMapping.optional(),
   }),
   policies: z.record(z.enum(ACTION_KINDS), PolicyModeSchema).default({}),
   rules: z.array(ApprovalRule).default([]),
@@ -197,6 +274,8 @@ export const RetrofitMapping = z.object({
   collections: CollectionsPlaybook.default({}),
   terms: PaymentTerms.default({}),
   commerce: Commerce.default({}),
+  plans: PlanPolicy.default({}),
+  customerRules: z.array(CustomerRule).default([]),
   /** Why each part of the mapping was chosen. Keys are dotted paths such as "invoice.fields.total". */
   rationale: z.record(z.string(), z.string()).default({}),
   confidence: z.record(z.string(), z.number().min(0).max(1)).default({}),
@@ -210,6 +289,8 @@ export type QuietHours = z.infer<typeof QuietHours>;
 export type CollectionsPlaybook = z.infer<typeof CollectionsPlaybook>;
 export type PaymentTerms = z.infer<typeof PaymentTerms>;
 export type Commerce = z.infer<typeof Commerce>;
+export type PlanPolicy = z.infer<typeof PlanPolicy>;
+export type CustomerRule = z.infer<typeof CustomerRule>;
 
 /**
  * Controls retrofit recommends for a new mapping: small refunds run on their own, big ones and daily
@@ -243,3 +324,4 @@ export type InvoiceMapping = z.infer<typeof InvoiceMapping>;
 export type CustomerMapping = z.infer<typeof CustomerMapping>;
 export type SubscriptionMapping = z.infer<typeof SubscriptionMapping>;
 export type ProductMapping = z.infer<typeof ProductMapping>;
+export type PayableMapping = z.infer<typeof PayableMapping>;

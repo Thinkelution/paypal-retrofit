@@ -199,7 +199,7 @@ export async function demo(opts: DemoOptions & { sandbox?: boolean }) {
           const rf = host.workspaces.get('fernhill')!.rf;
           seedInto(fernDb);
           rf.state.db.exec(
-            'DELETE FROM links; DELETE FROM events; DELETE FROM actions; DELETE FROM discrepancies; DELETE FROM meta; DELETE FROM plans; DELETE FROM payments; DELETE FROM digests; DELETE FROM adjustments; DELETE FROM requests; DELETE FROM orders; DELETE FROM outbox; DELETE FROM autopay;',
+            'DELETE FROM links; DELETE FROM events; DELETE FROM actions; DELETE FROM discrepancies; DELETE FROM meta; DELETE FROM plans; DELETE FROM payments; DELETE FROM digests; DELETE FROM adjustments; DELETE FROM requests; DELETE FROM orders; DELETE FROM outbox; DELETE FROM autopay; DELETE FROM writebacks; DELETE FROM inbox; DELETE FROM negotiations; DELETE FROM dispute_cases; DELETE FROM payouts; DELETE FROM acp_sessions; DELETE FROM acp_idempotency;',
           );
           await ensureWebhook(rf, { path: '' });
           await host.remove('brightside');

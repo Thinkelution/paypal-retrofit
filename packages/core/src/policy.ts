@@ -22,6 +22,8 @@ const LABEL: Record<ActionKind, string> = {
   create_subscription: 'new subscriptions',
   cancel_subscription: 'cancelling subscriptions',
   accept_dispute: 'accepting dispute claims',
+  submit_dispute_evidence: 'dispute evidence',
+  pay_supplier: 'supplier payments',
   offer_payment_plan: 'payment plans',
   apply_late_fee: 'late fees',
   expire_discount: 'ending early-payment discounts',

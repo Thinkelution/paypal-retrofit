@@ -151,6 +151,37 @@ const SHOTS = [
     })()`,
   },
   { file: 'collections.png', url: '/#collections', w: 1440, h: 900 },
+  { file: 'disputes.png', url: '/#disputes', w: 1440, h: 1000 },
+  { file: 'bills.png', url: '/#bills', w: 1440, h: 900 },
+  { file: 'shadow.png', url: '/#shadow', w: 1440, h: 1000 },
+  {
+    file: 'rules.png',
+    url: '/#rules',
+    w: 1440,
+    h: 1000,
+    script: typeInto(
+      '.rules-page textarea',
+      'Never chase Daniel Reyes before the 20th. Bills up to $500 run on their own. Paint the office blue.',
+    ),
+    after: ['Show me what changes'],
+  },
+  {
+    file: 'inbox.png',
+    url: '/#inbox',
+    w: 1440,
+    h: 1000,
+    clicks: ['Try: Payment for'],
+    after: ['Read it'],
+    settle: 4500, // let the toast go
+  },
+  {
+    file: 'trail.png',
+    url: '/#ledger',
+    w: 1440,
+    h: 900,
+    click: 'INV-1038',
+    script: `[...document.querySelectorAll('.drawer h4')].find((e) => e.innerText === 'Money trail')?.scrollIntoView()`,
+  },
   { file: 'insights.png', url: '/#insights', w: 1440, h: 1180 },
   { file: 'mapping.png', url: '/#mapping', w: 1440, h: 1000 },
   { file: 'discrepancies.png', url: '/#discrepancies', w: 1440, h: 760 },
@@ -283,6 +314,7 @@ try {
       await sleep(1500);
     }
     if (s.clicks) await page.send('Runtime.evaluate', { expression: 'window.scrollTo(0, 0)' });
+    if (s.settle) await sleep(s.settle);
     const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(out, s.file), Buffer.from(data, 'base64'));
     console.log(`${s.file}  ${s.w}x${s.h}`);

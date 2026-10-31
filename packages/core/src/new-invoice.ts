@@ -357,6 +357,7 @@ export async function addInvoice(
       .join('; ');
   const stored = await rf.source.insert(im.table, im.pk, complete(tableInfo(im.table), row, today, im.pk));
   const legacyPk = String(stored[im.pk]);
+  rf.state.addWriteback('invoice', legacyPk, 'insert', stored);
 
   if (im.lines) {
     const lm = im.lines;

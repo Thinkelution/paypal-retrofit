@@ -279,9 +279,9 @@ try {
     1800,
     'Fernhill Studio runs on an old invoicing app. 17 invoices are overdue, and every payment is marked paid by hand.',
   );
-  await sleep(4200);
+  await sleep(3600);
   await scroll(320);
-  await sleep(2600);
+  await sleep(2000);
 
   // 2. Connect what they have
   await go(
@@ -301,7 +301,7 @@ try {
 
   // 3. Today
   await go('/', 1800, 'The console opens on Today: what needs the owner, with one button each.');
-  await sleep(3800);
+  await sleep(3200);
   await click('Send now', { pause: 2600 });
   await caption("One click sends every open invoice through PayPal, under Fernhill's own invoice numbers.");
   await sleep(3200);
@@ -417,13 +417,24 @@ ${line('←', `approveUrl: ${co.approveUrl.replace(/^https?:\/\/[^/]+/, '')}`)}
   );
   await sleep(6500);
 
+  // 8b. Customers' emails
+  const inbox = await api('/api/inbox');
+  const cheque = inbox.samples.find((m) => /cheque/.test(m.text)) ?? inbox.samples[0];
+  if (cheque) await post('/api/inbox', cheque);
+  await go(
+    '/#inbox',
+    1800,
+    'Customer emails become promises, plan requests and drafted replies. A payment an email claims waits for the owner.',
+  );
+  await sleep(4600);
+
   // 9. The owner's rules
   await go(
     '/#collections',
     1800,
     "Collections decides who to remind, who promised to pay and who asked for a plan. Nothing goes out without the owner's rules.",
   );
-  await sleep(4200);
+  await sleep(3600);
   await click('Run playbook', { within: 'button', pause: 2400 });
   await go('/#approvals', 1200);
   await caption(
@@ -431,23 +442,63 @@ ${line('←', `approveUrl: ${co.approveUrl.replace(/^https?:\/\/[^/]+/, '')}`)}
   );
   await sleep(3600);
 
+  // 9b. Rules in their own words, tried on their own history
+  await go(
+    '/#rules',
+    1500,
+    'The owner writes the rules in plain English and sees what they change before saving.',
+  );
+  await type('.rules-page textarea', 'Refunds over $200 need me. Bills up to $500 run on their own.', {
+    perChar: 28,
+  });
+  await click('Show me what changes', { within: 'button', pause: 2600 });
+  await go(
+    '/#shadow',
+    2000,
+    'Shadow mode replays the last 90 days through the rules, touching nothing, and says what it assumes.',
+  );
+  await sleep(4400);
+
+  // 9c. A buyer disputes the invoice paid earlier: evidence from the records
+  await post('/api/demo/dispute', { legacyPk: added.legacyPk });
+  await sleep(1500);
+  await go(
+    '/#disputes',
+    1800,
+    "A buyer disputes INV-1050. retrofit drafts the response from Fernhill's own records, and lists what is missing instead of inventing it.",
+  );
+  await sleep(4200);
+  await click('Approve and send to PayPal', { within: 'button', pause: 1800 });
+  await caption(
+    'Once the owner approves, PayPal gets the response and a PDF of the records through the Disputes API.',
+  );
+  await sleep(3200);
+
+  // 9d. Money out: suppliers with PayPal Payouts
+  await go(
+    '/#bills',
+    1800,
+    'Bills are paid with PayPal Payouts. A new payee, or a PayPal email that changed since the last payment, always waits.',
+  );
+  await sleep(5000);
+
   // 10. Going live
   await go('/#golive', 1200);
   await caption(
     'Go live walks from the simulator to the PayPal sandbox to real payments, checking each step.',
   );
-  await sleep(4800);
+  await sleep(4000);
 
   await caption('');
   await go(
     card(
       'paypal-retrofit',
-      'PayPal Invoicing, Orders, Vault, Webhooks and the Agent Toolkit, with Claude. SQLite, Postgres, MySQL, CSV, Excel or a Google Sheet.',
+      'PayPal Invoicing, Orders, Vault, Disputes, Payouts, Webhooks and the Agent Toolkit, with Claude and the Agentic Commerce Protocol. SQLite, Postgres, MySQL, CSV, Excel or a Google Sheet.',
       'github.com/Thinkelution/paypal-retrofit · MIT · run it with Docker, Codespaces or Render',
     ),
     300,
   );
-  await sleep(6000);
+  await sleep(5000);
   if (cues.length && cues[cues.length - 1].end == null)
     cues[cues.length - 1].end = (Date.now() - started) / 1000;
   await send('Page.stopScreencast');

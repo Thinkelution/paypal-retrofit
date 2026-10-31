@@ -133,9 +133,11 @@ export class PayPalClient {
     const url = new URL(this.baseUrl + path);
     for (const [k, v] of Object.entries(o.query ?? {}))
       if (v !== undefined) url.searchParams.set(k, String(v));
+    // A FormData body is sent as multipart; fetch writes its Content-Type with the boundary.
+    const multipart = body instanceof FormData;
     const headers: Record<string, string> = {
       Authorization: `Bearer ${await this.accessToken()}`,
-      'Content-Type': 'application/json',
+      ...(multipart ? {} : { 'Content-Type': 'application/json' }),
       Accept: o.accept ?? 'application/json',
     };
     if (o.idempotencyKey) headers['PayPal-Request-Id'] = o.idempotencyKey.slice(0, 108);
@@ -144,7 +146,7 @@ export class PayPalClient {
     const res = await this.fetchImpl(url, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : multipart ? body : JSON.stringify(body),
     });
     const text = await res.text();
     const parsed = text ? safeJson(text) : undefined;
@@ -371,6 +373,50 @@ export class PayPalClient {
       note,
     });
   }
+  /**
+   * Submits the seller's evidence: an `input` part with the evidences JSON and, optionally, one document
+   * (PDF) as `evidence-file`. PayPal takes it while the dispute is WAITING_FOR_SELLER_RESPONSE.
+   */
+  provideDisputeEvidence(
+    id: string,
+    evidences: Array<{ evidence_type: string; notes?: string }>,
+    file?: { name: string; type: string; data: Buffer },
+  ) {
+    const form = new FormData();
+    form.append('input', new Blob([JSON.stringify({ evidences })], { type: 'application/json' }));
+    if (file)
+      form.append('evidence-file', new Blob([new Uint8Array(file.data)], { type: file.type }), file.name);
+    return this.request<any>(
+      'POST',
+      `/v1/customer/disputes/${encodeURIComponent(id)}/provide-evidence`,
+      form,
+    );
+  }
+  /** Sends a message to the buyer; PayPal allows it while the dispute is in the INQUIRY stage. */
+  sendDisputeMessage(id: string, message: string) {
+    return this.request<any>('POST', `/v1/customer/disputes/${encodeURIComponent(id)}/send-message`, {
+      message: message.slice(0, 2000),
+    });
+  }
+  // ---- Payouts v1 ----
+  /** One batch. PayPal refuses a sender_batch_id used in the last 30 days, so a bill cannot be paid twice. */
+  createPayout(body: unknown, idempotencyKey: string) {
+    return this.request<{ batch_header: { payout_batch_id: string; batch_status: string } }>(
+      'POST',
+      '/v1/payments/payouts',
+      body,
+      { idempotencyKey },
+    );
+  }
+  getPayoutBatch(id: string) {
+    return this.request<{ batch_header: any; items?: any[] }>(
+      'GET',
+      `/v1/payments/payouts/${encodeURIComponent(id)}`,
+    );
+  }
+  getPayoutItem(id: string) {
+    return this.request<any>('GET', `/v1/payments/payouts-item/${encodeURIComponent(id)}`);
+  }
   listTransactions(start: Date, end: Date) {
     return this.request<{ transaction_details?: any[] }>('GET', '/v1/reporting/transactions', undefined, {
       query: {
@@ -458,4 +504,14 @@ export const WEBHOOK_EVENTS = [
   'CHECKOUT.ORDER.COMPLETED',
   'VAULT.PAYMENT-TOKEN.CREATED',
   'VAULT.PAYMENT-TOKEN.DELETED',
+  'PAYMENT.PAYOUTSBATCH.SUCCESS',
+  'PAYMENT.PAYOUTSBATCH.DENIED',
+  'PAYMENT.PAYOUTS-ITEM.SUCCEEDED',
+  'PAYMENT.PAYOUTS-ITEM.UNCLAIMED',
+  'PAYMENT.PAYOUTS-ITEM.FAILED',
+  'PAYMENT.PAYOUTS-ITEM.RETURNED',
+  'PAYMENT.PAYOUTS-ITEM.BLOCKED',
+  'PAYMENT.PAYOUTS-ITEM.DENIED',
+  'PAYMENT.PAYOUTS-ITEM.HELD',
+  'PAYMENT.PAYOUTS-ITEM.REFUNDED',
 ];

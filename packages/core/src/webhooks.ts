@@ -1,4 +1,5 @@
 import { finalizeCheckout } from './commerce.ts';
+import { applyPayoutBatch, applyPayoutItem } from './payouts.ts';
 import type { Retrofit } from './engine.ts';
 import { PAID_STATUSES } from './paypal/client.ts';
 import { toMoney } from './util.ts';
@@ -129,6 +130,10 @@ async function applyEvent(rf: Retrofit, event: any): Promise<string | null> {
     return `Autopay for customer ${a.customerPk}: ${type}`;
   }
 
+  // Payouts to suppliers: an item's status, or a whole batch's.
+  if (type.startsWith('PAYMENT.PAYOUTS-ITEM.')) return applyPayoutItem(rf, r);
+  if (type.startsWith('PAYMENT.PAYOUTSBATCH.')) return applyPayoutBatch(rf, r);
+
   if (type.startsWith('PAYMENT.CAPTURE.')) {
     const orderId = r.supplementary_data?.related_ids?.order_id;
     if (orderId && rf.state.getOrder(String(orderId))) {
@@ -200,6 +205,7 @@ async function applyEvent(rf: Retrofit, event: any): Promise<string | null> {
           `Dispute resolved: ${r.dispute_outcome?.outcome_code ?? r.status ?? 'closed'}`,
         );
       }
+      rf.emit('dispute', { disputeId: r.dispute_id, resolved: true });
       return `Dispute ${r.dispute_id} resolved`;
     }
     rf.state.openDiscrepancy({
@@ -215,8 +221,10 @@ async function applyEvent(rf: Retrofit, event: any): Promise<string | null> {
           /_/g,
           ' ',
         )}), ${r.dispute_amount?.value ?? '?'} ${r.dispute_amount?.currency_code ?? ''}`.trim(),
-      suggestion: 'Ask the Support agent to draft a response with evidence from the legacy record.',
+      suggestion: 'Retrofit drafts a response from your records; review it on the Disputes page.',
     });
+    // The dispute autopilot (server) listens for this and prepares the evidence.
+    rf.emit('dispute', { disputeId: r.dispute_id, legacyPk: pk, created: type.endsWith('CREATED') });
     return `Dispute ${r.dispute_id} ${type.endsWith('CREATED') ? 'opened' : 'updated'}`;
   }
   return null;

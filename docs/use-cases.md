@@ -289,3 +289,83 @@ In the Xero and QuickBooks exports each fee is its own negative line, so they re
 
 **See it.** Sidebar → **Go live**.
 
+---
+
+## 25. "Why was this reminder sent?"
+
+**Real life.** A customer calls, upset about a reminder. The owner wants to know who sent it and why.
+
+**Logic.** The invoice's **money trail** lists every step in order: the action, who proposed it (sync, the Ops agent, the owner, the customer's portal or email), the rule that let it run or made it wait, each verified webhook from PayPal, payments and fees, and the exact columns retrofit wrote into the business's system.
+
+**See it.** Invoices → any row → **Money trail**; or ask Claude "why was INV-1038 reminded?" (`money_trail`).
+
+---
+
+## 26. The owner says the rules out loud
+
+**Real life.** "Refunds over $200 need me. Never chase the schools before the 20th, they pay after their board meets. No reminders after 7 pm."
+
+**Logic.** Claude (or patterns) turns each sentence into a rule, lists what it cannot do, and shows what changes **today** before anything is saved: reminders that would now be held, late fees added or dropped, waiting actions that would now run on their own.
+
+**See it.** **Rules** → type the sentences → **Show me what changes** → **Use these rules**.
+
+---
+
+## 27. "Would it have helped last quarter?"
+
+**Real life.** Before letting it chase real customers, the owner wants to see what it would have done.
+
+**Logic.** **Shadow mode** replays the last 30 to 180 days of the business's own invoices through the current rules without sending anything: invoices that would have gone out with a pay link, each reminder and late fee (and which would have waited for the owner), and an estimate of how much sooner money would have arrived, with the assumption stated.
+
+**See it.** **Shadow mode**; change a rule and replay.
+
+---
+
+## 28. "I posted a cheque on Monday"
+
+**Real life.** Customers answer reminders by email, not through a portal.
+
+**Logic.** The inbox agent matches the sender to a customer and reads the email against their invoices: a promise holds reminders until the date, "three payments" becomes a plan request, a question pauses chasing, "I paid by cheque" proposes recording the payment, and a reply is drafted. Money never moves on an email's say-so: the payment waits for the owner.
+
+**See it.** **Inbox** → **Try: Payment for INV-…** → **Read it**.
+
+---
+
+## 29. Two assistants agree a payment plan
+
+**Real life.** A customer tells their AI assistant "sort out a plan with Fernhill for that big invoice".
+
+**Logic.** Over the business's MCP endpoint, `propose_payment_plan` is answered by the owner's plan limits: agreed on the spot (the PayPal invoice now accepts instalments), a counter-offer the assistant can accept with `accept_plan_offer`, waiting for the owner, or declined, always with the reason.
+
+**See it.** Inbox → **Customers' assistants**; or with the portal link, ask Claude "can I pay INV-1041 in three parts?"
+
+---
+
+## 30. A buyer disputes a paid invoice
+
+**Real life.** "The photos delivered were not the ones agreed." PayPal gives the business ten days to respond.
+
+**Logic.** The dispute webhook starts the autopilot: the evidence pack comes from the records (what was invoiced, when it was sent and paid, the customer's history and emails), Claude drafts the response and picks the evidence type, and lists what is missing rather than inventing it. The owner edits and approves; PayPal receives the notes and a PDF of the records. If the customer complained by email first, it suggests settling instead.
+
+**See it.** **Disputes** → **See the PDF** → **Approve and send to PayPal**.
+
+---
+
+## 31. Paying the second shooter
+
+**Real life.** Contractors and suppliers send bills; the owner pays them one by one from their bank.
+
+**Logic.** Bills in the business's own table are paid to each payee's PayPal email with PayPal Payouts. A first payment to someone, or a PayPal email that changed since the last payment (the classic invoice-redirect scam), always waits for the owner, whatever the rules allow. The amount comes from the bill, a bill edited after approval is not paid, and the bill is marked paid only when PayPal confirms; an unclaimed payout is flagged.
+
+**See it.** **Bills to pay**: Pixel & Pine's changed email is flagged; pay Jordan Avery and approve it.
+
+---
+
+## 32. A shopping agent that speaks a standard
+
+**Real life.** Buyers' agents increasingly use the open Agentic Commerce Protocol rather than each shop's own tools.
+
+**Logic.** retrofit publishes `/.well-known/acp.json` and implements checkout sessions (create, update, retrieve, complete, cancel) with the protocol's idempotency rules and integer minor units, plus its MCP binding. Payment is a PayPal order the buyer approves; the agent completes the session and the sale lands in the books.
+
+**See it.** `curl http://localhost:8787/.well-known/acp.json`, then [docs/ACP.md](ACP.md).
+

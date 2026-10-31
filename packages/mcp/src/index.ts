@@ -50,6 +50,10 @@ const READ_ONLY = new Set([
   'month_end_summary',
   'find_invoices',
   'invoice_detail',
+  'money_trail',
+  'shadow_mode',
+  'bills_to_pay',
+  'dispute_cases',
   'legacy_sql',
   'list_discrepancies',
   'list_actions',
@@ -58,7 +62,7 @@ const READ_ONLY = new Set([
 
 const INSTRUCTIONS = `paypal-retrofit connects an existing business database to PayPal (invoices, subscriptions, payments) and keeps both sides reconciled.
 
-Use the read tools freely: business_summary, owner_digest, collections_plan, cash_forecast, payment_risk, customer_history, month_end_summary, find_invoices, invoice_detail, legacy_sql (read-only SELECT), list_discrepancies, list_actions, and the paypal_* reads.
+Use the read tools freely: business_summary, owner_digest, collections_plan, cash_forecast, payment_risk, customer_history, month_end_summary, find_invoices, invoice_detail, money_trail, shadow_mode, bills_to_pay, dispute_cases, legacy_sql (read-only SELECT), list_discrepancies, list_actions, and the paypal_* reads.
 
 Changes only happen through propose_action or run_collections. The owner's rules decide what happens next: "executed" ran now, "pending" waits for the owner's approval, "scheduled" is held for business hours (quiet hours), "rejected" is not allowed. Always tell the user which one happened and why (policyReason). Never claim money moved unless the status is "executed".`;
 
@@ -274,3 +278,4 @@ export function mcpHttpHandler(getRf: () => Retrofit, opts: McpOptions = {}) {
   };
 }
 export * from './shop.ts';
+export * from './acp.ts';

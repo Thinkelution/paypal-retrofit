@@ -8,7 +8,13 @@ import {
   customerProfiles,
   invoiceRisks,
   ledger,
+  listDisputes,
+  loadBills,
+  moneyTrail,
+  payablesView,
+  proposeBillPayments,
   monthSummary,
+  shadowReplay,
   planCollections,
   redact,
   runCollections,
@@ -201,6 +207,8 @@ export function engineTools(
 - create_invoice / send_invoice / update_invoice: no payload; usually done by sync.
 - create_subscription / cancel_subscription: target entity "subscription"; cancel takes {reason}.
 - accept_dispute: payload {disputeId, note}.
+- pay_supplier: entity "payable", number = the bill number from bills_to_pay; no payload (the amount is always the bill's). Pays the payee's PayPal email with PayPal Payouts. A first payment to a payee, or one to a changed PayPal email, always waits for the owner.
+- submit_dispute_evidence: payload {disputeId, response, evidenceType?}. Sends PayPal the response with a PDF of the business's records; usually prepared by the dispute autopilot. Always waits for the owner.
 - offer_payment_plan: payload {installments: 2-12, intervalDays?: 7-92, firstDue?: YYYY-MM-DD}. Uses PayPal partial payments on the same invoice; use it when a customer asked to pay in parts.
 - apply_late_fee: payload {amount}. Adds the owner's late fee to the PayPal invoice; usually proposed by run_collections under the owner's terms.
 - send_statement: target entity "customer", number = the customer key from customer_accounts. Emails the customer their statement with pay links and their portal link.
@@ -209,14 +217,32 @@ Results include "status": "executed", "pending" (needs approval), "scheduled" (h
 Call it once per target. Always tell the user what you proposed and whether it ran or is waiting for approval.`,
     inputSchema: z.object({
       kind: z.enum(ACTION_KINDS),
-      entity: z.enum(['invoice', 'subscription', 'customer']),
+      entity: z.enum(['invoice', 'subscription', 'customer', 'payable']),
       number: z
         .string()
-        .describe('Legacy invoice number (for invoices) or subscription id/title (for subscriptions)'),
+        .describe(
+          'Legacy invoice number (for invoices), subscription id/title (for subscriptions), or bill number (for payables)',
+        ),
       payload: z.record(z.string(), z.unknown()).optional(),
       reason: z.string().describe('One sentence a person will read when approving'),
     }),
     run: wrap('propose_action', async ({ kind, entity, number, payload, reason }) => {
+      if (entity === 'payable') {
+        if (kind !== 'pay_supplier') return { error: 'Bills can only be paid (pay_supplier)' };
+        const bill = (await loadBills(rf)).find(
+          (b) => b.number.toLowerCase() === number.toLowerCase() || b.pk === number,
+        );
+        if (!bill) return { error: `No bill matching "${number}"` };
+        const [r] = await proposeBillPayments(rf, [bill.pk], 'agent');
+        if (!r?.action) return { error: r?.error ?? 'Could not propose the payment' };
+        emit({ type: 'action_proposed', name: 'propose_action', action: r.action });
+        return {
+          id: r.action.id,
+          kind: r.action.kind,
+          status: r.action.status,
+          policyReason: r.action.policyReason,
+        };
+      }
       if (entity === 'customer') {
         const c = (await listCustomers(rf)).find(
           (x) => x.pk === number || x.name.toLowerCase() === number.toLowerCase(),
@@ -361,6 +387,59 @@ Call it once per target. Always tell the user what you proposed and whether it r
     ),
   });
 
+  const trail = betaZodTool({
+    name: 'money_trail',
+    description:
+      'Everything that happened to one invoice, in order: who proposed each action and which rule let it run, what PayPal reported by verified webhook, payments and fees, customer requests, and exactly which columns retrofit wrote into the business system. Use it for "why" and "who did this" questions.',
+    inputSchema: z.object({ number: z.string().describe('Invoice number, e.g. INV-1042, or a bill number') }),
+    run: wrap('money_trail', async ({ number }) => {
+      const row = (await ledger(rf)).find((r) => r.number.toLowerCase() === number.toLowerCase());
+      if (row) return moneyTrail(rf, row.entity, row.legacyPk);
+      const bill = (await loadBills(rf)).find((b) => b.number.toLowerCase() === number.toLowerCase());
+      if (bill) return moneyTrail(rf, 'payable', bill.pk);
+      return { error: `No invoice or bill ${number}` };
+    }),
+  });
+
+  const bills = betaZodTool({
+    name: 'bills_to_pay',
+    description:
+      'What the business owes its suppliers and contractors, from its own system: each bill with payee, PayPal email, amount, due date, and any PayPal payout already sent. check.hold says why paying it must wait for the owner (a first payment to that payee, or a PayPal email that changed since the last payment: a common fraud). Pay with propose_action kind pay_supplier.',
+    inputSchema: z.object({ open: z.boolean().optional().describe('Only bills still to pay') }),
+    run: wrap('bills_to_pay', async ({ open }) => {
+      const v = await payablesView(rf);
+      if (!v.enabled) return { error: 'This business has no bills table mapped' };
+      return { ...v, bills: open ? v.bills.filter((b) => b.state === 'open') : v.bills };
+    }),
+  });
+
+  const disputes = betaZodTool({
+    name: 'dispute_cases',
+    description:
+      'Buyer disputes PayPal reported, with the response retrofit drafted from the business records (summary, recommendation, the response text, the evidence it has and what is missing) and whether sending it waits for the owner. Read-only.',
+    inputSchema: z.object({}),
+    run: wrap('dispute_cases', async () => listDisputes(rf)),
+  });
+
+  const shadow = betaZodTool({
+    name: 'shadow_mode',
+    description:
+      'Replays the last N days of the business\'s invoices through retrofit\'s current rules without touching anything: invoices it would have sent with pay links, reminders (and which would have run on their own or waited for the owner), late fees, and an estimate of how much sooner money would have arrived, with the assumption stated. Use it for "what would retrofit have done" or "is it worth switching on" questions.',
+    inputSchema: z.object({
+      days: z.number().int().min(14).max(365).optional(),
+      daysAfterReminder: z
+        .number()
+        .int()
+        .min(1)
+        .max(30)
+        .optional()
+        .describe('Assumption for the estimate (default 7)'),
+    }),
+    run: wrap('shadow_mode', async ({ days, daysAfterReminder }) =>
+      shadowReplay(rf, { days, daysAfterReminder }),
+    ),
+  });
+
   const statement = betaZodTool({
     name: 'customer_statement',
     description:
@@ -416,6 +495,10 @@ Call it once per target. Always tell the user what you proposed and whether it r
     monthEnd,
     findInvoices,
     invoiceDetail,
+    trail,
+    shadow,
+    bills,
+    disputes,
     legacySql,
     listDiscrepancies,
     listActions,

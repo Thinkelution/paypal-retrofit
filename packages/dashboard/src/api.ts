@@ -502,6 +502,181 @@ export interface AutopayInfo {
   due: Array<{ legacyPk: string; number: string; customer: string; amount: number; due: string }>;
 }
 
+export interface InboxEmail {
+  id: number;
+  sender: string;
+  senderName: string | null;
+  subject: string | null;
+  body: string;
+  receivedAt: string;
+  customerPk: string | null;
+  reading: {
+    intent: string;
+    invoices: string[];
+    summary: string;
+    reply: string;
+    engine: 'claude' | 'rules';
+    payBy?: string;
+    installments?: number;
+    amount?: number;
+    method?: string;
+    warning?: string;
+  } | null;
+  status: 'new' | 'done' | 'needs_owner' | 'unknown_sender';
+  outcome: { requests: string[]; actions: number[]; notes: string[] } | null;
+  reply: string | null;
+  repliedAt: string | null;
+}
+
+export interface Negotiation {
+  id: string;
+  customer: string;
+  invoice: string;
+  ask: { installments: number; intervalDays?: number; firstDue?: string };
+  offer: { installments: number; intervalDays: number; firstDue: string; amounts: number[] } | null;
+  status: 'agreed' | 'owner' | 'counter' | 'declined' | 'taken';
+  reason: string;
+  via: string | null;
+  createdAt: string;
+}
+
+export interface RuleChange {
+  type: string;
+  explanation: string;
+  [k: string]: unknown;
+}
+
+export interface RulesPreview {
+  collections: Array<{ number: string; customer: string; before: string; after: string; reason: string }>;
+  lateFees: { added: string[]; dropped: string[] };
+  waiting: Array<{ id: number; label: string; before: string; after: string; reason: string }>;
+  summary: string;
+}
+
+export interface ShadowReport {
+  window: { from: string; to: string; days: number };
+  assumption: string;
+  invoices: number;
+  sent: number;
+  reminders: {
+    total: number;
+    onTheirOwn: number;
+    needYou: number;
+    heldByRules: number;
+    quietHoursShifted: number;
+  };
+  lateFees: { count: number; amount: number };
+  estimate: {
+    overdueInvoices: number;
+    avgDaysSooner: number;
+    amountSooner: number;
+    amountByToday: number;
+    paidDateUnknown: number;
+  };
+  weeks: Array<{ week: string; sent: number; reminders: number; lateFees: number }>;
+  examples: Array<{
+    number: string;
+    customer: string;
+    amount: number;
+    due: string;
+    actualPaid: string | null;
+    estimatedPaid: string | null;
+    daysSooner: number;
+    steps: Array<{ on: string; what: string; runs: string }>;
+  }>;
+}
+
+export interface TrailStep {
+  at: string;
+  kind: string;
+  by: string;
+  title: string;
+  detail?: string;
+  status?: string;
+}
+
+export interface Bill {
+  pk: string;
+  number: string;
+  payee: string;
+  email: string;
+  amount: number;
+  due: string | null;
+  description: string | null;
+  status: string;
+  state: 'open' | 'paid' | 'cancelled' | 'unknown';
+  paidOn: string | null;
+  daysToDue: number | null;
+  check: { known: boolean; previousEmail: string | null; lastPaidOn: string | null; hold: string | null };
+  payout: {
+    batchId: string;
+    status: string;
+    receiver: string;
+    transactionId: string | null;
+    fee: number | null;
+    error: string | null;
+  } | null;
+  action: { id: number; status: string; policyReason: string | null; result: any } | null;
+}
+
+export interface PayablesView {
+  enabled: boolean;
+  currency: string;
+  table: string | null;
+  bills: Bill[];
+  totals: { open: number; dueThisWeek: number; overdue: number; paidThroughPayPal: number } | null;
+}
+
+export interface EvidenceDraft {
+  summary: string;
+  recommendation: 'contest' | 'offer_partial_refund' | 'accept';
+  reasoning: string;
+  response: string;
+  evidenceType: string;
+  evidence: Array<{ item: string; source: string; available: boolean }>;
+  missing: string[];
+}
+
+export interface DisputeCase {
+  disputeId: string;
+  legacyPk: string | null;
+  status: 'drafting' | 'ready' | 'proposed' | 'submitted' | 'failed';
+  draft: EvidenceDraft | null;
+  engine: 'claude' | 'records' | null;
+  actionId: number | null;
+  error: string | null;
+  updatedAt: string;
+}
+
+export interface DisputeListItem {
+  disputeId: string;
+  legacyPk: string | null;
+  number: string | null;
+  customer: string | null;
+  detail: string;
+  openedAt: string;
+  resolvedAt: string | null;
+  resolution: string | null;
+  case: DisputeCase | null;
+  action: { id: number; status: string; policyReason: string | null; result: any } | null;
+}
+
+export interface EvidencePack {
+  disputeId: string;
+  status: string;
+  stage: string | null;
+  reasonText: string;
+  amount: number;
+  currency: string;
+  openedAt: string | null;
+  respondBy: string | null;
+  buyerSays: string[];
+  invoice: { number: string; issued: string | null; total: number } | null;
+  customer: { name: string; paidBefore: number } | null;
+  facts: Array<{ at: string | null; item: string; detail: string; source: string }>;
+  channel: 'evidence' | 'message' | 'none';
+}
+
 /** Set when this console is one client of several, served under /c/<id> (multi-client mode and the demo). */
 export const BASE = (window.location.pathname.match(/^\/c\/[^/]+/) ?? [''])[0];
 /** Host-level APIs live at the root; everything else belongs to this workspace. */
@@ -543,7 +718,6 @@ export const api = {
   schema: () => req<any>('GET', '/api/schema'),
   mapping: () => req<any>('GET', '/api/mapping'),
   saveMapping: (m: unknown) => req<any>('PUT', '/api/mapping', m),
-  draftDispute: (id: string) => req<any>('POST', `/api/disputes/${encodeURIComponent(id)}/draft`),
   resetDemo: () => req('POST', '/api/demo/reset'),
   demoDispute: (legacyPk: string) => req<any>('POST', '/api/demo/dispute', { legacyPk }),
   resetAgent: (sessionId: string) => req('POST', '/api/agent/reset', { sessionId }),
@@ -605,6 +779,51 @@ export const api = {
     }) => req<AddedInvoice>('POST', '/api/invoices', body),
   },
   today: () => req<TodayView>('GET', '/api/today'),
+  inbox: () =>
+    req<{
+      emails: InboxEmail[];
+      samples: Array<{ from: string; name?: string; subject?: string; text: string }>;
+    }>('GET', '/api/inbox'),
+  takeEmail: (e: { from: string; name?: string; subject?: string; text: string }) =>
+    req<InboxEmail>('POST', '/api/inbox', e),
+  replyEmail: (id: number, text?: string) =>
+    req<{ status: string; detail: string }>('POST', `/api/inbox/${id}/reply`, { text }),
+  negotiations: () => req<Negotiation[]>('GET', '/api/negotiations'),
+  rules: () => req<{ sentences: string[] }>('GET', '/api/rules'),
+  previewRules: (text: string) =>
+    req<{
+      changes: RuleChange[];
+      unsupported: string[];
+      engine: string;
+      warning?: string;
+      preview: RulesPreview;
+    }>('POST', '/api/rules/preview', { text }),
+  applyRules: (changes: RuleChange[]) =>
+    req<{ sentences: string[] }>('POST', '/api/rules/apply', { changes }),
+  shadow: (days: number, after: number) =>
+    req<ShadowReport>('GET', `/api/shadow?days=${days}&after=${after}`),
+  trail: (entity: string, pk: string) =>
+    req<{ number: string | null; steps: TrailStep[] }>(
+      'GET',
+      `/api/trail/${entity}/${encodeURIComponent(pk)}`,
+    ),
+  payables: () => req<PayablesView>('GET', '/api/payables'),
+  payBills: (pks: string[]) =>
+    req<{ results: Array<{ pk: string; number?: string; action?: Action; error?: string }> }>(
+      'POST',
+      '/api/payables/pay',
+      { pks },
+    ),
+  disputes: () => req<{ disputes: DisputeListItem[]; evidenceTypes: string[] }>('GET', '/api/disputes'),
+  dispute: (id: string) =>
+    req<{ pack: EvidencePack; case: DisputeCase | null; action: Action | null }>(
+      'GET',
+      `/api/disputes/${encodeURIComponent(id)}`,
+    ),
+  prepareDispute: (id: string) => req<DisputeCase>('POST', `/api/disputes/${encodeURIComponent(id)}/prepare`),
+  proposeEvidence: (id: string, body: { response: string; evidenceType: string }) =>
+    req<DisputeCase>('POST', `/api/disputes/${encodeURIComponent(id)}/evidence`, body),
+  disputePdfUrl: (id: string) => u(`/api/disputes/${encodeURIComponent(id)}/evidence.pdf`),
   golive: () => req<GoLive>('GET', '/api/golive'),
   registerWebhook: () => req<{ id: string; url: string; events: number }>('POST', '/api/golive/webhook'),
   autopay: () => req<AutopayInfo>('GET', '/api/autopay'),
@@ -697,6 +916,8 @@ export const KIND_LABEL: Record<string, string> = {
   create_subscription: 'Create subscription',
   cancel_subscription: 'Cancel subscription',
   accept_dispute: 'Accept dispute',
+  submit_dispute_evidence: 'Submit dispute evidence',
+  pay_supplier: 'Pay supplier',
   offer_payment_plan: 'Offer payment plan',
   apply_late_fee: 'Add late fee',
   expire_discount: 'End early-payment discount',
@@ -715,4 +936,6 @@ export const DISCREPANCY_LABEL: Record<string, string> = {
   refunded_in_paypal: 'Refunded in PayPal',
   dispute: 'Dispute',
   payment_failed: 'Payment failed',
+  payout_unclaimed: 'Payout not claimed yet',
+  payout_failed: 'Payout failed',
 };

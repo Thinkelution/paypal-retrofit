@@ -49,6 +49,8 @@ export const ACTION_KINDS = [
   'create_subscription',
   'cancel_subscription',
   'accept_dispute',
+  'submit_dispute_evidence',
+  'pay_supplier',
   'offer_payment_plan',
   'apply_late_fee',
   'expire_discount',
@@ -58,13 +60,23 @@ export const ACTION_KINDS = [
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
 export interface ActionTarget {
-  entity: 'invoice' | 'subscription' | 'customer';
+  entity: 'invoice' | 'subscription' | 'customer' | 'payable';
   legacyPk: string;
   paypalId?: string;
   label?: string;
 }
 
-export type ActionOrigin = 'sync' | 'agent' | 'dashboard' | 'cli' | 'reconcile' | 'portal';
+export type ActionOrigin =
+  | 'sync'
+  | 'agent'
+  | 'dashboard'
+  | 'cli'
+  | 'reconcile'
+  | 'portal'
+  /** A customer's email, read by the inbox agent. Emails can be forged: money actions always wait for the owner. */
+  | 'inbox'
+  /** A customer's own AI assistant over MCP. */
+  | 'assistant';
 
 export interface ActionRecord {
   id: number;

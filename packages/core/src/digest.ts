@@ -92,6 +92,8 @@ export const KIND_LABEL: Record<string, string> = {
   create_subscription: 'Start subscription',
   cancel_subscription: 'Cancel subscription',
   accept_dispute: 'Accept dispute',
+  submit_dispute_evidence: 'Submit dispute evidence',
+  pay_supplier: 'Pay supplier',
   offer_payment_plan: 'Offer payment plan',
   apply_late_fee: 'Add late fee',
   expire_discount: 'End early-payment discount',

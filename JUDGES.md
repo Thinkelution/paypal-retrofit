@@ -17,7 +17,7 @@ What to try (about 5 minutes). The console opens on **Today**; the left sidebar 
 6. **Customers** → **Portal ↗** for any customer: the private page they get. Tick invoices and **Pay selected with PayPal**, or **Set up autopay with PayPal**: approve on the simulator's PayPal page, and from then on their invoices are paid on the due date (Run collections charges any that are due; collections stop chasing them).
 7. **Approvals**: approve the "Social content package" retainer as a PayPal subscription, open its row, **Approve as customer**, and the retainer turns `active` in the legacy app.
 8. **Collections** shows the playbook's decision for every overdue invoice: INV-1042 on **Hold** (the customer promised to pay), INV-1038 **Offer plan** (they asked to split it), the rest a friendly first reminder. **Run playbook**; reminders wait in Approvals, or are **Scheduled** for 08:00 in the evening (Pacific time).
-9. **Ask the agent**: "Send reminders for everything more than 14 days overdue." It proposes one reminder each; they wait for approval. On a paid invoice, **Simulate buyer dispute**: it appears under **Mismatches**, and **Draft response** asks the Support agent for a reply built from the invoice records.
+9. **Ask the agent**: "Send reminders for everything more than 14 days overdue." It proposes one reminder each; they wait for approval. On a paid invoice, **Simulate buyer dispute**: it appears under **Disputes** with a response already drafted from Fernhill's records (step 18).
 10. **Cash & risk**: the 9-week forecast, late-payment risk with reasons, and how each customer pays. Download the Xero or QuickBooks file: each PayPal fee is its own line.
 11. **Morning digest**: the owner's daily email or Slack post, with a signed **Review** link per waiting action.
 12. **Go live**: ten checked steps from the simulator to the PayPal sandbox to live, each checked against what retrofit actually sees.
@@ -25,6 +25,16 @@ What to try (about 5 minutes). The console opens on **Today**; the left sidebar 
 14. Switch to **Brightside Plumbing** (client picker, sidebar), a second business that runs on CSV exports, with a 2% late fee after 30 days and 2% off for paying within 10 days. **All clients…** is the bookkeeper's view of every client.
 15. **⋯ → Try your own data** opens the no-code setup wizard: upload an **Excel workbook** or CSV exports (one sheet with everything works), paste a **Google Sheet** link, or pick the Brightside sample. Check the mapping, set the rules in plain words, preview, **Go live**.
 16. **Connect Claude (MCP)** (sidebar) plugs Claude Code or Claude Desktop into the owner's side: `claude mcp add --transport http paypal-retrofit <demo-url>/mcp`, then "give me my morning briefing".
+
+The newest additions:
+
+17. **Invoices** → any row: the **Money trail** at the bottom of the drawer shows who did what and why, each verified webhook, and the exact columns written into Fernhill's database.
+18. **Disputes** (after step 9 or the shortcut below): the buyer's complaint, a response drafted from the invoice, its sending, payment and the customer's own history, what is missing (proof of delivery), and **See the PDF** that PayPal will receive. Edit it, then **Approve and send to PayPal**: the simulator's dispute moves to *under review* with the notes and the PDF.
+19. **Inbox** → **Try: Payment for INV-…** → **Read it**: "says they paid by check", a payment proposed for approval (an email can be forged), a reply drafted. Try the others: a promise holds reminders, "three payments" becomes a plan request.
+20. **Rules**: type "Never chase Daniel Reyes before the 20th. Bills up to $500 run on their own. Paint the office blue." → **Show me what changes**: two rules, one thing retrofit cannot do, and what changes today. **Use these rules**, then see them in **Your rules now**.
+21. **Shadow mode**: the last 90 days of Fernhill's invoices replayed through those rules. Nothing is sent; the estimate says what it assumes.
+22. **Bills to pay**: Pixel & Pine's latest bill gives a new PayPal email and Sam Rivera has never been paid, so both are flagged and always wait. Tick Jordan Avery → **Pay with PayPal** → approve in **Approvals**: the bill shows *Paid via PayPal*, and **⋯ → Legacy app → Bills** shows it paid with the PayPal reference.
+23. **Shop** lists the open checkout standard: `curl <demo-url>/.well-known/acp.json`. Any Agentic Commerce Protocol agent can create a checkout session at `<demo-url>/acp/checkout_sessions` (any bearer token in the simulator; examples in [docs/ACP.md](docs/ACP.md)).
 
 Shortcut: `node scripts/stage-demo.mjs` puts a fresh demo into a lived-in state in a few seconds: payments, a plan, a dispute, an agent's order, an invoice added from a sentence, a customer on autopay, and Brightside's portal and assistant activity.
 
@@ -73,7 +83,7 @@ Log in to <https://www.sandbox.paypal.com> as the buyer to pay an invoice. PayPa
 ## Checks
 
 ```bash
-pnpm test         # 55 tests: engine, webhooks, reconcile, CSV, Excel, Google Sheets, agents (incl. photo reading), digest, setup wizard, MCP, terms, portal, autopay, website widget, QR, go-live, shop, multi-client; all offline
+pnpm test         # 64 tests: engine, webhooks, reconcile, CSV, Excel, Google Sheets, agents (incl. photo reading), digest, setup wizard, MCP, terms, portal, autopay, website widget, QR, go-live, shop, multi-client, money trail, shadow mode, inbox, plan negotiation, plain-English rules, dispute evidence, payouts, ACP; all offline
 pnpm smoke:sandbox   # live sandbox: create, send and record one invoice (needs credentials)
 ```
 

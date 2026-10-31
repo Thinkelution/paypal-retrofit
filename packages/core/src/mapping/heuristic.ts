@@ -1,5 +1,11 @@
 import type { SchemaDescription, TableInfo } from '../types.ts';
-import { CollectionsPlaybook, Commerce, recommendedControls, type RetrofitMapping } from './schema.ts';
+import {
+  CollectionsPlaybook,
+  Commerce,
+  PlanPolicy,
+  recommendedControls,
+  type RetrofitMapping,
+} from './schema.ts';
 
 /**
  * A deterministic, name-based mapper. Used when no Claude API key is configured, and as a hint for the
@@ -43,6 +49,10 @@ export function heuristicMapping(
   const subs = pick(
     ['retainer', 'subscription', 'membership', 'plan', 'recurring', 'monthly'],
     [customers?.name, lines?.name, invoices?.name, products?.name].filter(Boolean) as string[],
+  );
+  const bills = pick(
+    ['bill', 'payable', 'supplier', 'vendor', 'contractor', 'payee', 'expense'],
+    [customers?.name, lines?.name, invoices?.name, products?.name, subs?.name].filter(Boolean) as string[],
   );
   // One sheet with everything, as many spreadsheets are: each invoice row names its customer, keyed by email.
   const inlineEmail = !customers && invoices ? col(invoices, [/e_?mail/i]) : undefined;
@@ -147,6 +157,8 @@ export function heuristicMapping(
     collections: CollectionsPlaybook.parse({}),
     terms: {},
     commerce: Commerce.parse({}),
+    plans: PlanPolicy.parse({}),
+    customerRules: [],
     rationale: {
       'customer.table': inlineEmail
         ? `"${invoices.name}" names the customer on each invoice row; customers are told apart by "${inlineEmail}"`
@@ -186,6 +198,39 @@ export function heuristicMapping(
     };
     m.rationale['subscription.table'] = `"${subs.name}" looks like a recurring agreement`;
     m.confidence.subscription = 0.5;
+  }
+
+  // Bills to pay need a payee's email and an amount; without both there is nothing Payouts can do.
+  const billEmail = col(bills, [/(payee|vendor|supplier|contractor|paypal)_?e_?mail/i, /e_?mail/i]);
+  const billAmount = col(bills, [/^amount$/i, /^total$/i, /amount|total/i]);
+  if (bills && billEmail && billAmount) {
+    const bStatus = col(bills, [/^status$/i, /state$/i]) ?? 'status';
+    const bVals = bills.enums[bStatus] ?? [];
+    m.entities.payable = {
+      table: bills.name,
+      pk: pk(bills),
+      fields: {
+        number: col(bills, [/bill_?(no|num|number)/i, /^number$/i, /^ref/i]),
+        payee: col(bills, [/^payee$/i, /payee_?name|vendor|supplier|contractor/i, /^name$/i]) ?? 'payee',
+        email: billEmail,
+        amount: billAmount,
+        due: col(bills, [/due/i]),
+        description: col(bills, [/desc|memo|for$|purpose/i]),
+        status: bStatus,
+      },
+      statusMap: {
+        open: bVals.filter((s) => !isPaid(s) && !isCancelled(s)),
+        paid: bVals.filter(isPaid),
+        cancelled: bVals.filter(isCancelled),
+      },
+      writeBack: {
+        status: bStatus,
+        paidAt: col(bills, [/paid_?(at|on|date)/i]) ?? add('Paid_on'),
+        reference: col(bills, [/payout|paypal|reference|ref_?no/i]) ?? add('PayPal_payout'),
+      },
+    };
+    m.rationale['payable.table'] = `"${bills.name}" lists what the business owes, with each payee's email`;
+    m.confidence.payable = 0.5;
   }
   return JSON.parse(JSON.stringify(m));
 }

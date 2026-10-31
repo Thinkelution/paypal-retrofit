@@ -45,11 +45,23 @@ paypal-retrofit is an SDK, CLI and web console, plus a no-code setup wizard, an 
 - **The customer's own assistant.** With their portal link, a customer's Claude (or any MCP client) sees what they owe, pays several invoices in one PayPal checkout, or promises a date, asks for a plan or asks a question. A person approves every payment.
 - **Go-live checklist.** Ten steps from the built-in simulator to the PayPal sandbox to live, each checked against what retrofit actually sees: a verified webhook event, a test payment, the paid status written back.
 
+### An agent you can trust with more
+
+- **Money trail.** Every invoice shows its whole story: who proposed each action and which rule let it run, each verified PayPal webhook, payments and fees, and exactly which columns retrofit wrote into the business's own system.
+- **Rules in plain English, previewed.** "Refunds over $200 need me. Never chase schools before the 20th." Claude turns sentences into rules, says what it cannot do, and shows what changes today before anything is saved.
+- **Shadow mode.** Replays the last 90 days of the business's own invoices through the rules, touching nothing: what would have been sent, every reminder and late fee, which would have waited for the owner, and an estimate of how much sooner money would have arrived, with the assumption stated.
+- **Inbox agent.** Customer emails ("I'll pay Friday", "I posted a cheque", "can I split it?") become promises, plan requests, questions and drafted replies; anything that moves money waits for the owner, because an email can be forged.
+- **Assistant-to-assistant payment plans.** A customer's AI assistant asks for a plan over MCP; inside the owner's limits it is agreed on the spot and the PayPal invoice takes instalments, outside them it gets a counter-offer.
+- **Dispute evidence autopilot.** When a buyer opens a dispute, retrofit builds the evidence from the records, Claude drafts the response, and once the owner approves, PayPal receives the notes and a PDF of the records through the Disputes API.
+- **Pay suppliers with PayPal Payouts.** Bills in the business's own system are paid to each payee's PayPal email. A new payee or a changed PayPal email (how invoice-redirect fraud works) always waits for the owner, and the bill is marked paid only when PayPal confirms.
+- **Open checkout standard.** Any agent that speaks the Agentic Commerce Protocol can buy from the catalogue: discovery, checkout sessions with the protocol's idempotency rules, and its MCP binding, paid with a PayPal order the buyer approves.
+
 ## How we built it
 
 - TypeScript monorepo: engine (`core`), agents, MCP server (official `@modelcontextprotocol/sdk`), Express server with the setup wizard API and digest delivery, React console, CLI, and a local PayPal mock for offline tests.
-- PayPal: Invoicing v2 (create, send, remind, cancel, record payment/refund, search, invoice discounts, **QR codes**), **Orders v2** (create, capture, and charges on a saved PayPal with `vault_id`) for the portal, shop, agent and autopay checkouts, **Vault v3** (setup tokens, payment tokens) for autopay, Payments v2 capture refunds, Catalog Products, Billing Plans and Subscriptions, Webhooks (create, verify signature, 19 event types), Disputes, Transaction Search, and the **PayPal Agent Toolkit**, whose read tools are bridged into Claude's tool runner.
-- AI: Claude (`claude-opus-5-5`) through the official Anthropic SDK. Structured outputs for the Mapper, Support and invoice-reader agents (the reader with an image block for photos of job sheets); the SDK tool runner for the Ops agent; server-side refusal fallback; masked personal data; read-only SQL.
+- PayPal: Invoicing v2 (create, send, remind, cancel, record payment/refund, search, invoice discounts, **QR codes**), **Orders v2** (create, capture, and charges on a saved PayPal with `vault_id`) for the portal, shop, agent and autopay checkouts, **Vault v3** (setup tokens, payment tokens) for autopay, Payments v2 capture refunds, Catalog Products, Billing Plans and Subscriptions, Webhooks (create, verify signature, 29 event types), Disputes (including provide-evidence with a PDF and send-message), **Payouts** for supplier bills, Transaction Search, and the **PayPal Agent Toolkit**, whose read tools are bridged into Claude's tool runner.
+- The Agentic Commerce Protocol (checkout sessions, discovery, MCP binding) on top of PayPal Orders.
+- AI: Claude (`claude-opus-5-5`) through the official Anthropic SDK. Structured outputs for the Mapper, Support, invoice-reader, inbox-reader and rules-compiler agents (the reader with an image block for photos of job sheets); the SDK tool runner for the Ops agent; server-side refusal fallback; masked personal data; read-only SQL.
 - AG Grid Community for every table in the console, including editable mapping grids. Render Blueprint, a Dockerfile and a Codespaces dev container for one-click runs. exceljs and mysql2 for the new sources.
 
 ## Challenges
@@ -70,11 +82,11 @@ QuickBooks and Xero as live sources, Pay Later messaging on the portal and shop,
 
 ## Built with
 
-TypeScript, Node.js, Express, React, Vite, AG Grid, SQLite, PostgreSQL, MySQL, Excel (exceljs), Google Sheets, PayPal REST APIs (Invoicing, Orders, Vault, Webhooks, Subscriptions, Disputes), PayPal Agent Toolkit, Model Context Protocol, Anthropic Claude, Docker, GitHub Codespaces, Render.
+TypeScript, Node.js, Express, React, Vite, AG Grid, SQLite, PostgreSQL, MySQL, Excel (exceljs), Google Sheets, PayPal REST APIs (Invoicing, Orders, Vault, Webhooks, Subscriptions, Disputes, Payouts), PayPal Agent Toolkit, Model Context Protocol, Agentic Commerce Protocol, Anthropic Claude, Docker, GitHub Codespaces, Render.
 
 ## Tools used (AI)
 
-Anthropic Claude (`claude-opus-5-5`) via the official `@anthropic-ai/sdk`: (1) the Mapper agent turns a database schema into a typed PayPal mapping with structured outputs; (2) the Ops agent uses the SDK tool runner with retrofit's engine tools and PayPal Agent Toolkit read tools; (3) the Support agent drafts dispute responses with structured outputs; (4) the reminder and digest writers draft customer reminders and the owner's morning note; (5) the invoice reader turns a sentence or a photo of a paper job sheet into an invoice draft (vision + structured outputs); (6) the MCP servers let the owner's own Claude use the same tools under the same rules, and let customers' and shoppers' assistants pay and buy, with a person approving every payment. Claude Code was used as a development assistant.
+Anthropic Claude (`claude-opus-5-5`) via the official `@anthropic-ai/sdk`: (1) the Mapper agent turns a database schema into a typed PayPal mapping with structured outputs; (2) the Ops agent uses the SDK tool runner with retrofit's engine tools and PayPal Agent Toolkit read tools; (3) the Support agent drafts dispute responses and picks the evidence from the business's records with structured outputs, and retrofit sends them to PayPal once the owner approves; the inbox reader reads customer emails and the rules compiler turns the owner's sentences into rules; (4) the reminder and digest writers draft customer reminders and the owner's morning note; (5) the invoice reader turns a sentence or a photo of a paper job sheet into an invoice draft (vision + structured outputs); (6) the MCP servers let the owner's own Claude use the same tools under the same rules, and let customers' and shoppers' assistants pay and buy, with a person approving every payment. Claude Code was used as a development assistant.
 
 ## Links
 

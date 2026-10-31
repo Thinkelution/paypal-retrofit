@@ -1,4 +1,5 @@
 import type { Retrofit } from './engine.ts';
+import { rulesFor } from './customer-rules.ts';
 import { loadInvoices } from './entities.ts';
 import type { PaymentTerms } from './mapping/schema.ts';
 import type { ActionRecord } from './types.ts';
@@ -86,6 +87,7 @@ export async function planTerms(rf: Retrofit, today = todayIso()): Promise<Terms
     if (pending('apply_late_fee')) continue;
     // Never charge a fee to a customer who is disputing, on a plan, or has asked for one or promised a date.
     if (disputes.has(inv.pk)) continue;
+    if (rulesFor(rf.mapping, inv).some((r) => r.noLateFees)) continue;
     if (rf.state.getPlan(inv.pk)?.status === 'active') continue;
     if (rf.state.listRequests({ status: 'open', legacyPk: inv.pk }).length) continue;
     if (rf.state.actionsFor('apply_late_fee', 'invoice', inv.pk).some((a) => a.status === 'rejected'))

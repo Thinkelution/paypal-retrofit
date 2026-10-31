@@ -37,7 +37,7 @@ export function createFernhillApp(getDb: () => Database.Database, base = '') {
   .note{background:#fff8dc;border:1px solid #e0d6a8;padding:8px 12px;margin:12px 0;font-size:14px}
   @media (max-width:640px){.hide-sm{display:none}}
 </style></head><body>
-<header><h1>Fernhill Studio · Invoicing</h1><a href="${u('/')}">Invoices</a><a href="${u('/retainers')}">Retainers</a><a href="${u('/customers')}">Customers</a></header>
+<header><h1>Fernhill Studio · Invoicing</h1><a href="${u('/')}">Invoices</a><a href="${u('/retainers')}">Retainers</a><a href="${u('/bills')}">Bills</a><a href="${u('/customers')}">Customers</a></header>
 <main>${body}</main></body></html>`;
   }
 
@@ -123,6 +123,22 @@ ${inv.notes ? `<p><em>${esc(inv.notes)}</em></p>` : ''}${paypal}${paid}${action}
       page(
         'Retainers',
         `<div class="wrap"><table><thead><tr><th>Retainer</th><th>Customer</th><th>Fee</th><th>Start</th><th>Status</th><th>PayPal</th></tr></thead><tbody>${tr}</tbody></table></div>`,
+      ),
+    );
+  });
+
+  app.get('/bills', (_req, res) => {
+    const rows = getDb().prepare(`SELECT * FROM bills ORDER BY due_on DESC`).all() as any[];
+    const tr = rows
+      .map(
+        (r) =>
+          `<tr><td>${esc(r.bill_no)}</td><td>${esc(r.payee)}<div class="hide-sm" style="color:#777;font-size:12px">${esc(r.payee_email)}</div></td><td class="hide-sm">${esc(r.description ?? '')}</td><td>${money(r.amount)}</td><td>${esc(r.due_on ?? '')}</td><td>${esc(r.status)}${r.paid_on ? ` ${esc(r.paid_on)}` : ''}</td><td class="pp">${esc(r.payout_ref ?? '—')}</td></tr>`,
+      )
+      .join('');
+    res.send(
+      page(
+        'Bills',
+        `<div class="wrap"><table><thead><tr><th>Bill</th><th>Payee</th><th class="hide-sm">For</th><th>Amount</th><th>Due</th><th>Status</th><th>PayPal</th></tr></thead><tbody>${tr}</tbody></table></div>`,
       ),
     );
   });

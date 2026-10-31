@@ -20,6 +20,7 @@ export async function submitCustomerRequest(
     message?: string;
     /** How it arrived, for the owner: "in the portal", "through their AI assistant". */
     via?: string;
+    origin?: 'portal' | 'inbox' | 'assistant';
   },
 ): Promise<{ number: string; kind: CustomerRequestKind }> {
   const s = await buildStatement(rf, input.customerPk);
@@ -43,7 +44,7 @@ export async function submitCustomerRequest(
   if (kind === 'plan' && line.inPayPal && !line.onPlan) {
     await rf
       .propose({
-        origin: 'portal',
+        origin: input.origin ?? 'portal',
         kind: 'offer_payment_plan',
         target: { entity: 'invoice', legacyPk: input.legacyPk, label: line.number },
         payload: { installments, intervalDays: 14, amount: line.balance },

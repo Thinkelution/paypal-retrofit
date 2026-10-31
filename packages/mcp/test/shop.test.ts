@@ -31,6 +31,8 @@ describe('buyer-facing shop MCP', () => {
       'my_invoices',
       'pay_my_invoices',
       'tell_the_business',
+      'propose_payment_plan',
+      'accept_plan_offer',
     ]);
     const found = JSON.parse(
       textOf(await client.callTool({ name: 'search_catalog', arguments: { query: 'portrait' } })),
@@ -90,6 +92,8 @@ describe('buyer-facing shop MCP', () => {
       'my_invoices',
       'pay_my_invoices',
       'tell_the_business',
+      'propose_payment_plan',
+      'accept_plan_offer',
     ]);
   });
 

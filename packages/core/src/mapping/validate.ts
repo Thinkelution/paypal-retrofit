@@ -130,6 +130,25 @@ export function validateMapping(
     }
   }
 
+  if (e.payable) {
+    const bt = table('payable.table', e.payable.table);
+    column('payable.pk', bt, e.payable.pk, true);
+    for (const [k, v] of Object.entries(e.payable.fields)) {
+      const required = ['payee', 'email', 'amount', 'status'].includes(k);
+      if (!column(`payable.fields.${k}`, bt, v, required)) delete (e.payable.fields as any)[k];
+    }
+    if (!SPREADSHEETS.includes(schema.source))
+      for (const [k, v] of Object.entries(e.payable.writeBack)) {
+        if (!column(`payable.writeBack.${k}`, bt, v, false)) delete (e.payable.writeBack as any)[k];
+      }
+    if (!e.payable.statusMap.paid.length)
+      issues.push({
+        path: 'payable.statusMap.paid',
+        level: 'warning',
+        message: 'No status means paid, so paid bills cannot be marked in your system',
+      });
+  }
+
   return { mapping, issues };
 }
 

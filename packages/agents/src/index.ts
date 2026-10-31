@@ -7,3 +7,5 @@ export { paypalTools, TOOLKIT_READ_ACTIONS } from './tools/paypal-tools.ts';
 export * from './reminders.ts';
 export * from './digest-note.ts';
 export * from './invoice-draft.ts';
+export * from './inbox-reader.ts';
+export * from './rules-compiler.ts';

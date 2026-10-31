@@ -38,6 +38,11 @@ interface State {
   subscriptions: Record<string, any>;
   webhooks: Record<string, Webhook>;
   disputes: Record<string, any>;
+  /** Payouts batches by payout_batch_id, and which sender_batch_id made each. */
+  payouts: Record<string, any>;
+  payoutSenderIds: Record<string, string>;
+  /** Documents sellers attached as dispute evidence, by dispute id (base64). */
+  disputeDocuments: Record<string, Array<{ name: string; type: string; data: string }>>;
   orders: Record<string, any>;
   setupTokens: Record<string, any>;
   paymentTokens: Record<string, any>;
@@ -53,6 +58,9 @@ const empty = (): State => ({
   subscriptions: {},
   webhooks: {},
   disputes: {},
+  payouts: {},
+  payoutSenderIds: {},
+  disputeDocuments: {},
   orders: {},
   setupTokens: {},
   paymentTokens: {},
@@ -666,19 +674,279 @@ export function createMockPayPal(opts: MockOptions) {
       ),
     }),
   );
+  // HATEOAS links say what the seller can do now, as PayPal's do.
+  const disputeView = (d: any) => {
+    const href = (p = '') => `${base}/v1/customer/disputes/${d.dispute_id}${p}`;
+    const links = [{ href: href(), rel: 'self', method: 'GET' }];
+    if (d.status === 'WAITING_FOR_SELLER_RESPONSE')
+      links.push(
+        { href: href('/provide-evidence'), rel: 'provide_evidence', method: 'POST' },
+        { href: href('/accept-claim'), rel: 'accept_claim', method: 'POST' },
+      );
+    if (d.dispute_life_cycle_stage === 'INQUIRY' && d.status !== 'RESOLVED')
+      links.push({ href: href('/send-message'), rel: 'send_message', method: 'POST' });
+    return { ...d, links };
+  };
   app.get('/v1/customer/disputes/:id', auth, (req, res) =>
     state.disputes[req.params.id!]
-      ? res.json(state.disputes[req.params.id!])
+      ? res.json(disputeView(state.disputes[req.params.id!]))
       : fail(res, 404, 'RESOURCE_NOT_FOUND', 'Dispute not found'),
   );
+  // Multipart: an `input` part with {evidences: [...]} and an optional `evidence-file` document.
+  app.post(
+    '/v1/customer/disputes/:id/provide-evidence',
+    auth,
+    express.raw({ type: () => true, limit: '12mb' }),
+    async (req, res) => {
+      const d = state.disputes[req.params.id!];
+      if (!d) return fail(res, 404, 'RESOURCE_NOT_FOUND', 'Dispute not found');
+      if (d.status !== 'WAITING_FOR_SELLER_RESPONSE')
+        return fail(
+          res,
+          422,
+          'UNPROCESSABLE_ENTITY',
+          `Evidence is not accepted while the dispute is ${d.status}`,
+          'ACTION_NOT_ALLOWED',
+        );
+      let form: FormData;
+      try {
+        form = await new Request('http://mock/', {
+          method: 'POST',
+          headers: { 'content-type': String(req.headers['content-type'] ?? '') },
+          body: req.body as Buffer,
+        }).formData();
+      } catch {
+        return fail(res, 400, 'INVALID_REQUEST', 'Expected multipart/form-data', 'INVALID_CONTENT_TYPE');
+      }
+      const raw = form.get('input');
+      let evidences: any[] = [];
+      try {
+        evidences = JSON.parse(typeof raw === 'string' ? raw : raw ? await raw.text() : '{}').evidences ?? [];
+      } catch {
+        return fail(res, 400, 'INVALID_REQUEST', 'The input part is not JSON', 'MALFORMED_REQUEST_JSON');
+      }
+      if (!Array.isArray(evidences) || !evidences.length)
+        return fail(res, 400, 'INVALID_REQUEST', 'evidences is required', 'MISSING_REQUIRED_PARAMETER');
+      for (const e of evidences)
+        if (!/^[A-Z0-9_]+$/.test(String(e?.evidence_type ?? '')) || String(e?.notes ?? '').length > 2000)
+          return fail(
+            res,
+            400,
+            'INVALID_REQUEST',
+            'Each evidence needs an evidence_type and notes of at most 2000 characters',
+            'INVALID_PARAMETER_VALUE',
+          );
+      const file = form.get('evidence-file');
+      const docs = (state.disputeDocuments[d.dispute_id] ??= []);
+      let document: { name: string; url: string } | null = null;
+      if (file && typeof file !== 'string') {
+        if (!/^(application\/pdf|image\/(png|jpeg|gif))$/.test(file.type) || file.size > 10 * 1024 * 1024)
+          return fail(
+            res,
+            400,
+            'INVALID_REQUEST',
+            'Documents must be PDF, PNG, JPEG or GIF, up to 10MB',
+            'INVALID_FILE_TYPE',
+          );
+        docs.push({
+          name: file.name,
+          type: file.type,
+          data: Buffer.from(await file.arrayBuffer()).toString('base64'),
+        });
+        document = {
+          name: file.name,
+          url: `${base}/mock/api/disputes/${d.dispute_id}/documents/${docs.length - 1}`,
+        };
+      }
+      d.evidences = [
+        ...(d.evidences ?? []),
+        ...evidences.map((e) => ({
+          evidence_type: e.evidence_type,
+          notes: e.notes,
+          source: 'SUBMITTED_BY_SELLER',
+          date: nowIso(),
+          documents: document ? [document] : [],
+        })),
+      ];
+      d.status = 'UNDER_REVIEW';
+      d.dispute_state = 'UNDER_PAYPAL_REVIEW';
+      d.update_time = nowIso();
+      save();
+      res.json({
+        links: [{ href: `${base}/v1/customer/disputes/${d.dispute_id}`, rel: 'self', method: 'GET' }],
+      });
+      await emit('CUSTOMER.DISPUTE.UPDATED', disputeView(d), 'Seller provided evidence');
+    },
+  );
+  app.post('/v1/customer/disputes/:id/send-message', auth, async (req, res) => {
+    const d = state.disputes[req.params.id!];
+    if (!d) return fail(res, 404, 'RESOURCE_NOT_FOUND', 'Dispute not found');
+    if (d.dispute_life_cycle_stage !== 'INQUIRY' || d.status === 'RESOLVED')
+      return fail(
+        res,
+        422,
+        'UNPROCESSABLE_ENTITY',
+        'Messages can be sent only while the dispute is an inquiry',
+        'ACTION_NOT_ALLOWED',
+      );
+    const message = String(req.body?.message ?? '');
+    if (!message || message.length > 2000)
+      return fail(
+        res,
+        400,
+        'INVALID_REQUEST',
+        'message is required, at most 2000 characters',
+        'INVALID_PARAMETER_VALUE',
+      );
+    d.messages = [...(d.messages ?? []), { posted_by: 'SELLER', time_posted: nowIso(), content: message }];
+    d.update_time = nowIso();
+    save();
+    res.json({
+      links: [{ href: `${base}/v1/customer/disputes/${d.dispute_id}`, rel: 'self', method: 'GET' }],
+    });
+    await emit('CUSTOMER.DISPUTE.UPDATED', disputeView(d), 'Seller sent a message');
+  });
   app.post('/v1/customer/disputes/:id/accept-claim', auth, async (req, res) => {
     const d = state.disputes[req.params.id!];
     if (!d) return fail(res, 404, 'RESOURCE_NOT_FOUND', 'Dispute not found');
     d.status = 'RESOLVED';
+    d.dispute_state = 'RESOLVED';
     d.dispute_outcome = { outcome_code: 'RESOLVED_BUYER_FAVOUR', amount_refunded: d.dispute_amount };
     save();
     res.json({ links: [] });
-    await emit('CUSTOMER.DISPUTE.RESOLVED', d, 'Dispute resolved');
+    await emit('CUSTOMER.DISPUTE.RESOLVED', disputeView(d), 'Dispute resolved');
+  });
+
+  // ---------------------------------------------------------------- payouts
+  const payoutRef = (n: number) => crypto.randomBytes(n).toString('hex').toUpperCase().slice(0, 13);
+  const batchView = (b: any) => ({
+    ...b,
+    links: [
+      { href: `${base}/v1/payments/payouts/${b.batch_header.payout_batch_id}`, rel: 'self', method: 'GET' },
+    ],
+  });
+  const findPayoutItem = (id: string) => {
+    for (const b of Object.values(state.payouts))
+      for (const it of b.items as any[]) if (it.payout_item_id === id) return { b, it };
+    return null;
+  };
+  const itemEvent: Record<string, string> = {
+    SUCCESS: 'PAYMENT.PAYOUTS-ITEM.SUCCEEDED',
+    UNCLAIMED: 'PAYMENT.PAYOUTS-ITEM.UNCLAIMED',
+    FAILED: 'PAYMENT.PAYOUTS-ITEM.FAILED',
+  };
+  app.post('/v1/payments/payouts', auth, (req, res) => {
+    const h = req.body?.sender_batch_header ?? {};
+    const items: any[] = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length)
+      return fail(res, 400, 'VALIDATION_ERROR', 'items is required', 'MISSING_REQUIRED_PARAMETER');
+    // PayPal does not process a sender_batch_id used in the last 30 days.
+    if (h.sender_batch_id && state.payoutSenderIds[h.sender_batch_id])
+      return fail(
+        res,
+        400,
+        'USER_BUSINESS_ERROR',
+        'Batch with given sender_batch_id already exists',
+        'DUPLICATE_REQUEST_ID',
+      );
+    for (const it of items)
+      if (
+        !(Number(it?.amount?.value) > 0) ||
+        !it?.amount?.currency ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(it?.receiver ?? ''))
+      )
+        return fail(
+          res,
+          422,
+          'VALIDATION_ERROR',
+          'Each item needs a positive amount, a currency and a receiver email',
+          'INVALID_PARAMETER_VALUE',
+        );
+    const id = payoutRef(7);
+    const currency = items[0].amount.currency;
+    const b = {
+      batch_header: {
+        payout_batch_id: id,
+        batch_status: 'PENDING',
+        time_created: nowIso(),
+        sender_batch_header: h,
+        amount: { currency, value: items.reduce((t, it) => t + Number(it.amount.value), 0).toFixed(2) },
+        fees: { currency, value: '0.00' },
+      },
+      items: items.map((it) => ({
+        payout_item_id: payoutRef(7),
+        transaction_status: 'PENDING',
+        payout_batch_id: id,
+        payout_item_fee: { currency: it.amount.currency, value: '0.00' },
+        payout_item: {
+          recipient_type: it.recipient_type ?? h.recipient_type ?? 'EMAIL',
+          amount: it.amount,
+          note: it.note,
+          receiver: it.receiver,
+          sender_item_id: it.sender_item_id,
+        },
+      })),
+    };
+    state.payouts[id] = b;
+    if (h.sender_batch_id) state.payoutSenderIds[h.sender_batch_id] = id;
+    save();
+    res.status(201).json({
+      batch_header: { payout_batch_id: id, batch_status: 'PENDING', sender_batch_header: h },
+      links: batchView(b).links,
+    });
+    // PayPal processes the batch a moment later and reports each item.
+    setTimeout(() => void processPayout(id), 30);
+  });
+  /**
+   * Receivers whose email mentions "unclaimed" have no PayPal account yet (the money waits for them);
+   * "invalid" ones fail. Everyone else is paid. The fee is 2%, at most 20.
+   */
+  async function processPayout(id: string) {
+    const b = state.payouts[id];
+    if (!b) return;
+    let fees = 0;
+    for (const it of b.items) {
+      const fee = Math.min(20, Math.round(Number(it.payout_item.amount.value) * 2) / 100);
+      fees += fee;
+      it.payout_item_fee = { currency: it.payout_item.amount.currency, value: fee.toFixed(2) };
+      it.time_processed = nowIso();
+      if (/invalid/i.test(it.payout_item.receiver)) {
+        it.transaction_status = 'FAILED';
+        it.errors = { name: 'RECEIVER_UNREGISTERED', message: 'Receiver is unregistered' };
+      } else {
+        it.transaction_id = crypto.randomBytes(9).toString('hex').toUpperCase().slice(0, 17);
+        it.transaction_status = /unclaimed/i.test(it.payout_item.receiver) ? 'UNCLAIMED' : 'SUCCESS';
+      }
+    }
+    b.batch_header.batch_status = 'SUCCESS';
+    b.batch_header.time_completed = nowIso();
+    b.batch_header.fees = { currency: b.batch_header.amount.currency, value: fees.toFixed(2) };
+    save();
+    await emit('PAYMENT.PAYOUTSBATCH.SUCCESS', batchView(b), 'Payouts batch completed successfully.');
+    for (const it of b.items)
+      await emit(itemEvent[it.transaction_status]!, it, `Payout item ${it.transaction_status.toLowerCase()}`);
+  }
+  app.get('/v1/payments/payouts/:id', auth, (req, res) =>
+    state.payouts[req.params.id!]
+      ? res.json(batchView(state.payouts[req.params.id!]))
+      : fail(res, 404, 'RESOURCE_NOT_FOUND', 'Payout batch not found', 'INVALID_RESOURCE_ID'),
+  );
+  app.get('/v1/payments/payouts-item/:id', auth, (req, res) => {
+    const f = findPayoutItem(req.params.id!);
+    return f
+      ? res.json(f.it)
+      : fail(res, 404, 'RESOURCE_NOT_FOUND', 'Payout item not found', 'INVALID_RESOURCE_ID');
+  });
+  /** The payee signs up and claims an unclaimed payout. */
+  app.post('/mock/api/payouts-item/:id/claim', async (req, res) => {
+    const f = findPayoutItem(req.params.id!);
+    if (!f || f.it.transaction_status !== 'UNCLAIMED')
+      return fail(res, 422, 'UNPROCESSABLE_ENTITY', 'Only unclaimed payouts can be claimed');
+    f.it.transaction_status = 'SUCCESS';
+    f.it.time_processed = nowIso();
+    save();
+    await emit('PAYMENT.PAYOUTS-ITEM.SUCCEEDED', f.it, 'Payout item claimed');
+    res.json(f.it);
   });
 
   app.get('/v1/reporting/transactions', auth, (req, res) => {
@@ -1294,7 +1562,7 @@ ${s.status === 'APPROVAL_PENDING' ? `<form method="post" action="${esc(req.baseU
       create_time: nowIso(),
       update_time: nowIso(),
       reason: req.body?.reason ?? 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
-      status: 'OPEN',
+      status: 'WAITING_FOR_SELLER_RESPONSE',
       dispute_state: 'REQUIRED_ACTION',
       dispute_life_cycle_stage: 'INQUIRY',
       dispute_channel: 'INTERNAL',
@@ -1320,8 +1588,31 @@ ${s.status === 'APPROVAL_PENDING' ? `<form method="post" action="${esc(req.baseU
     };
     state.disputes[id] = d;
     save();
-    await emit('CUSTOMER.DISPUTE.CREATED', d, 'A new dispute opened');
-    res.status(201).json(d);
+    await emit('CUSTOMER.DISPUTE.CREATED', disputeView(d), 'A new dispute opened');
+    res.status(201).json(disputeView(d));
+  });
+  /** Decides a dispute, as PayPal would after reviewing both sides. */
+  app.post('/mock/api/disputes/:id/resolve', async (req, res) => {
+    const d = state.disputes[req.params.id!];
+    if (!d) return fail(res, 404, 'RESOURCE_NOT_FOUND', 'Dispute not found');
+    const seller = req.body?.outcome !== 'buyer';
+    d.status = 'RESOLVED';
+    d.dispute_state = 'RESOLVED';
+    d.update_time = nowIso();
+    d.dispute_outcome = seller
+      ? { outcome_code: 'RESOLVED_SELLER_FAVOUR' }
+      : { outcome_code: 'RESOLVED_BUYER_FAVOUR', amount_refunded: d.dispute_amount };
+    save();
+    await emit('CUSTOMER.DISPUTE.RESOLVED', disputeView(d), 'Dispute resolved');
+    res.json(disputeView(d));
+  });
+  /** A document a seller attached as evidence, as PayPal stored it. */
+  app.get('/mock/api/disputes/:id/documents/:n', (req, res) => {
+    const doc = state.disputeDocuments[req.params.id!]?.[Number(req.params.n)];
+    if (!doc) return fail(res, 404, 'RESOURCE_NOT_FOUND', 'Document not found');
+    res.setHeader('Content-Type', doc.type);
+    res.setHeader('Content-Disposition', `inline; filename="${doc.name.replace(/[^\w.-]/g, '_')}"`);
+    res.send(Buffer.from(doc.data, 'base64'));
   });
 
   const reset = () => {

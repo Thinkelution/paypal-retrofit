@@ -30,6 +30,14 @@
 | `core/golive` | The go-live checklist, computed from observed state: verified webhook events, payments received and written back, credentials that authenticate. |
 | `core/today` | The owner's home screen: needs (approvals, requests, disputes, mismatches, invoices ready, reminders and autopay due, set-up), money this week and recent activity. |
 | `server/widget` | `/widget.js` for the business's own website (Shadow DOM; Pay a bill, Pay buttons, catalogue), `/widget/lookup` and `/pay` (number + email, rate limited, CORS for lookups), `/llms.txt`, pay slips and QR images, and the demo's `/site`. |
+| `core/trail` | The money trail of one invoice, subscription or bill: the link, actions (proposed and decided, with the rule), orders, verified webhook events that mention its PayPal ids, payments, payouts, write-backs (`writebacks` table), requests and adjustments, in time order. |
+| `core/inbox` | Customer emails: the sender is matched to a customer, read against their open and recently paid invoices (Claude, or patterns), then requests are filed and money actions proposed with origin `inbox`; replies go out by SMTP or stay in the outbox. |
+| `core/negotiate` | Payment plans asked for by a customer's assistant: agreed inside the owner's `plans` limits (an `offer_payment_plan` with the owner's rule as the reason), a counter-offer outside them, or waiting for the owner. |
+| `core/rules-text` | Plain-English rules: pattern parser, `applyRuleChanges` (validated against the mapping schema), `previewRules` (today's collections, late fees and waiting actions with the candidate rules swapped in) and `describeRules`. |
+| `core/shadow` | Shadow mode: replays N days of invoices through the current rules, reminders and late fees, read-only. |
+| `core/disputes`, `core/pdf` | The dispute evidence autopilot: evidence pack from the records, records-only draft, the PDF sent to PayPal (a small dependency-free PDF writer), proposal and execution (`provide-evidence` or `send-message`, whichever PayPal offers). |
+| `core/payouts` | Bills (`payable` mapping), payee checks, `pay_supplier` proposals and execution as Payouts batches, payout webhooks and refresh, write-back of the paid status. |
+| `core/acp`, `server/acp`, `mcp/acp` | Agentic Commerce Protocol: sessions on top of the Orders checkout, idempotency (`acp_idempotency`), discovery, the PayPal handler's spec and schemas, and the MCP binding. |
 | `core/digest` | Builds the owner's digest, renders it as HTML email, text and Slack Block Kit, signs and verifies approval-link tokens, decides when the scheduled digest is due. |
 | `cli` | Commander CLI; `demo` mounts mock PayPal and Fernhill next to the console. |
 | `mock-paypal` | In-memory PayPal stand-in with signed webhooks and buyer pages; used by tests and the offline demo. |
@@ -81,9 +89,37 @@ The portal's **Set up autopay** creates a Vault setup token (`usage_type: MERCHA
 
 Every payment, refund and payment recorded outside PayPal is mirrored into the `payments` table from the invoice's `payments` and `refunds` transactions, keyed by the PayPal payment id. Fees come from `PAYMENT.CAPTURE.COMPLETED` (`seller_receivable_breakdown.paypal_fee`) and, if missing, from Transaction Search during reconciliation.
 
+## Money trail
+
+`moneyTrail` merges what retrofit already records: `actions` (with `policy_reason`), `orders`, `events` whose payload mentions the record's PayPal ids, `payments`, `payouts`, `requests`, `adjustments` and the `writebacks` log (every update or insert retrofit made into the business's system, with the exact columns and values). Date-only payment dates are ordered by when they were recorded that day.
+
+## Inbox agent
+
+`POST /api/inbox` (console) and `POST /inbound/email?token=` (Postmark, Mailgun or generic fields; `RETROFIT_INBOUND_TOKEN`, timing-safe compare) store the email, match the sender to a customer, and read it with Claude (`readCustomerEmail`, structured output, effort low) or patterns. Promises, plan requests and questions become customer `requests` (they hold reminders); a payment made another way becomes `record_payment` and a statement request `send_statement`, both with origin `inbox`. The engine forces `confirm` on any money-moving action from an email, whatever the owner's rules say.
+
+## Plans agreed with assistants
+
+`propose_payment_plan` on the public MCP server calls `negotiatePlan`. It refuses invoices that are not open, already on a plan or disputed; clamps the ask to `plans.maxInstallments`, `maxIntervalDays` and `maxDaysToFirstPayment` (a counter-offer, valid for seven days while the balance is unchanged); and agrees on its own only when the amount, the number of payments and the customer's on-time rate are inside `plans.autoAccept`. Agreements are `offer_payment_plan` actions with origin `assistant`; the owner's limit is passed as `ownerRule`, which can turn `confirm` into `auto` but is only ever set by server code.
+
+## Rules in plain English and shadow mode
+
+`compileRules` (Claude, structured output; patterns without a key) produces `RuleChange`s: approvals by amount, daily limits, quiet hours, customer rules (`customerRules`: no reminders before a day of the month, none at all, no late fees; matched by customer key, words in the name or email domain), late fees, discounts, plan limits and reminder days. `previewRules` swaps the candidate mapping in and diffs today's collections plan, late fees and the mode of every waiting action. `shadowReplay` walks every invoice that was in play during the window: sent (issued in the window and in a pushable status), each reminder step that would have fallen due while it was unpaid (held by customer rules, decided by `decidePolicy` at 10:00 on that day), late fees; the estimate assumes an overdue invoice is paid within N days of its first reminder, or when it was actually paid if sooner (the `paidAt` write-back column).
+
+## Dispute evidence autopilot
+
+`CUSTOMER.DISPUTE.CREATED` opens a `dispute` discrepancy and emits `dispute`; `startDisputeAutopilot` (started by the server) calls `prepareDisputeCase`. The evidence pack is read from the records (invoice, lines, notes, sent, reminders, payments, plan, requests, the customer's emails about it, earlier paid invoices). Claude drafts (`DisputeDraft`: summary, recommendation, reasoning, response, evidence type, evidence checklist, missing) or the records-only template does; the case is stored in `dispute_cases`. When the recommendation is to contest and PayPal takes a response, a `submit_dispute_evidence` action is proposed; the engine never lets it run on its own. Execution re-reads the dispute: with a `provide_evidence` link it posts multipart `input` (`evidences: [{evidence_type, notes}]`) plus `evidence-file` (the PDF); in the inquiry stage with only `send_message` it posts the response as a message. Editing the response replaces the pending action.
+
+## Supplier payouts
+
+An optional `payable` entity in the mapping names the bills table, payee, PayPal email, amount, due date and statuses (the heuristic finds tables named like bills, payables, suppliers or contractors that have an email and an amount). `pay_supplier` actions take their amount from the bill, never from the proposer, and carry the email and amount the owner saw: if the bill says otherwise when the action runs, it fails. Before an action may run on its own, `supplierHold` checks the payee's history (paid bills in the business's table, successful payouts): a first payment, or an email that differs from the last one paid, forces `confirm` and is shown in the reason even when the policy already waits. Execution creates one Payouts batch (`sender_batch_id` `retrofit-<bill>-<action>`, so PayPal refuses a duplicate) and records it in `payouts`; `PAYMENT.PAYOUTS-ITEM.*` and `PAYMENT.PAYOUTSBATCH.*` webhooks (or a refresh when the Bills page loads) mark the bill paid with the date and transaction id, or open `payout_unclaimed` / `payout_failed`.
+
+## Agentic Commerce Protocol
+
+`/.well-known/acp.json` is public and cacheable. `/acp/checkout_sessions` requires `Authorization: Bearer` (`RETROFIT_ACP_TOKEN`; any token in the simulator), `API-Version` (2026-01-16 or 2026-04-17) and, on every POST, `Idempotency-Key`: keys are scoped to the caller (a hash of the token) and endpoint, the request body is compared by canonical JSON (SHA-256), a replay returns the stored status and body with `Idempotent-Replayed: true`, a different body is `422 idempotency_conflict`, a request in flight is `409` with `Retry-After`, and 5xx responses are not stored. Sessions (`acp_sessions`) wrap the Orders checkout: each cart is a PayPal order whose approval link is in the handler config and `continue_url`; a new cart gets a new order and the old one is cancelled; completing checks the order id, waits for the buyer's approval (`approval_required`), captures and books it; cancelling marks the order cancelled so a late approval is never captured. `/acp/mcp` exposes the same five operations as MCP tools with `{meta, id, payload}`; errors are JSON-RPC `-32000` with the ACP error in `data`.
+
 ## Actions and policies
 
-Every side effect is an `ActionRecord` with an origin (`sync`, `agent`, `dashboard`, `cli`, `reconcile`), a target, a payload, a human-readable reason and the policy that applied.
+Every side effect is an `ActionRecord` with an origin (`sync`, `agent`, `dashboard`, `cli`, `reconcile`, `portal`, `inbox`, `assistant`), a target, a payload, a human-readable reason and the policy that applied.
 
 | Policy | Effect |
 | --- | --- |
@@ -96,6 +132,8 @@ On top of the per-kind policy:
 - **Rules** (`rules` in the mapping) pick a mode by amount, for example refunds up to 100 run automatically. The first matching rule wins.
 - **Limits** (`limits`) cap what runs automatically per day in the business time zone, by count or amount; over the cap, "auto" becomes "confirm".
 - **Quiet hours** (`quietHours`) hold customer-facing kinds (reminders, payment-plan offers) until business hours: the action becomes `scheduled` with `run_after`, and the server runs due actions every minute. `approve --force` (Send now) skips the hold.
+
+Three rules sit above every setting: a money-moving action that came from an email waits for the owner; `submit_dispute_evidence` always waits; `pay_supplier` to a first-time payee or a changed PayPal email waits.
 
 Each action stores its `amount` and a `policy_reason` such as "Daily limit: 480.00 of 500.00 USD in refunds already ran today; this 40.00 needs approval".
 
@@ -129,6 +167,13 @@ requests(id, customer_pk, legacy_pk, kind, detail, until, installments, status, 
 orders(id, paypal_order_id, channel, status, items, invoices, total, currency, buyer, approve_url, capture_id, fee, created_at, updated_at)
 outbox(id, kind, customer_pk, recipient, subject, html, text, status, detail, created_at)
 autopay(customer_pk, status, setup_token_id, payment_token_id, paypal_customer_id, payer_email, max_amount, last_error, last_charge_at, created_at, updated_at)
+writebacks(id, entity, legacy_pk, kind, patch, created_at)
+inbox(id, sender, sender_name, subject, body, received_at, customer_pk, reading, status, outcome, reply, replied_at)
+negotiations(id, customer_pk, legacy_pk, ask, offer, status, reason, action_id, via, created_at, updated_at)
+dispute_cases(dispute_id, legacy_pk, status, draft, engine, action_id, error, created_at, updated_at)
+payouts(batch_id, item_id, legacy_pk, action_id, receiver, payee, amount, currency, status, transaction_id, fee, error, created_at, updated_at)
+acp_sessions(id, status, currency, items, buyer, fulfillment, order_id, agent, created_at, updated_at, expires_at)
+acp_idempotency(scope, key, fingerprint, status, body, in_flight, created_at)
 ```
 
 ## Security notes

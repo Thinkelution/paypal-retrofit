@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ActionKind, ActionOrigin, ActionRecord, ActionTarget, PolicyMode } from '../types.ts';
+import type { ActionKind, ActionOrigin, ActionRecord, ActionTarget, PolicyMode, Row } from '../types.ts';
 
 export interface LinkRecord {
   entity: string;
@@ -95,6 +95,21 @@ CREATE TABLE IF NOT EXISTS outbox (
   subject TEXT NOT NULL, html TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL, detail TEXT,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS writebacks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT NOT NULL, legacy_pk TEXT NOT NULL, kind TEXT NOT NULL,
+  patch TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS writebacks_pk ON writebacks (entity, legacy_pk);
+CREATE TABLE IF NOT EXISTS inbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT NOT NULL, sender_name TEXT, subject TEXT, body TEXT NOT NULL,
+  received_at TEXT NOT NULL, customer_pk TEXT, reading TEXT, status TEXT NOT NULL, outcome TEXT, reply TEXT,
+  replied_at TEXT
+);
+CREATE TABLE IF NOT EXISTS negotiations (
+  id TEXT PRIMARY KEY, customer_pk TEXT NOT NULL, legacy_pk TEXT NOT NULL, ask TEXT NOT NULL, offer TEXT,
+  status TEXT NOT NULL, reason TEXT NOT NULL, action_id INTEGER, via TEXT, created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS autopay (
   customer_pk TEXT PRIMARY KEY, status TEXT NOT NULL, setup_token_id TEXT, payment_token_id TEXT,
   paypal_customer_id TEXT, payer_email TEXT, max_amount REAL, last_error TEXT, last_charge_at TEXT,
@@ -103,6 +118,24 @@ CREATE TABLE IF NOT EXISTS autopay (
 CREATE TABLE IF NOT EXISTS digests (
   id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, trigger TEXT NOT NULL, subject TEXT NOT NULL,
   deliveries TEXT NOT NULL, html TEXT NOT NULL, text TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS payouts (
+  batch_id TEXT PRIMARY KEY, item_id TEXT, legacy_pk TEXT NOT NULL, action_id INTEGER, receiver TEXT NOT NULL,
+  payee TEXT, amount REAL NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL, transaction_id TEXT, fee REAL,
+  error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS payouts_bill ON payouts (legacy_pk);
+CREATE TABLE IF NOT EXISTS acp_sessions (
+  id TEXT PRIMARY KEY, status TEXT NOT NULL, currency TEXT NOT NULL, items TEXT NOT NULL, buyer TEXT, fulfillment TEXT,
+  order_id TEXT, agent TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS acp_idempotency (
+  scope TEXT NOT NULL, key TEXT NOT NULL, fingerprint TEXT NOT NULL, status INTEGER, body TEXT,
+  in_flight INTEGER NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (scope, key)
+);
+CREATE TABLE IF NOT EXISTS dispute_cases (
+  dispute_id TEXT PRIMARY KEY, legacy_pk TEXT, status TEXT NOT NULL, draft TEXT, engine TEXT, action_id INTEGER,
+  error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 `;
 
@@ -170,6 +203,123 @@ export interface OrderRecord {
   updatedAt: string;
 }
 
+/** One write retrofit made into the business's own system: which row, which columns, which values. */
+export interface WritebackRecord {
+  id: number;
+  entity: string;
+  legacyPk: string;
+  kind: 'update' | 'insert';
+  patch: Row;
+  createdAt: string;
+}
+
+/** A customer email read by the inbox agent, and what came of it. */
+export interface InboxRecord {
+  id: number;
+  sender: string;
+  senderName: string | null;
+  subject: string | null;
+  body: string;
+  receivedAt: string;
+  customerPk: string | null;
+  /** The structured reading (intent, invoices, dates, amounts, the drafted reply). */
+  reading: Record<string, any> | null;
+  status: 'new' | 'done' | 'needs_owner' | 'unknown_sender';
+  /** What retrofit did: requests filed, actions proposed. */
+  outcome: Record<string, any> | null;
+  reply: string | null;
+  repliedAt: string | null;
+}
+
+export interface PlanTerms {
+  installments: number;
+  intervalDays: number;
+  /** YYYY-MM-DD */
+  firstDue: string;
+  /** Equal parts of the balance; the last one takes the rounding. */
+  amounts: number[];
+}
+
+/** One payment-plan negotiation with a customer or their AI assistant. */
+export interface NegotiationRecord {
+  id: string;
+  customerPk: string;
+  legacyPk: string;
+  ask: { installments: number; intervalDays?: number; firstDue?: string };
+  offer: PlanTerms | null;
+  /** agreed: plan set up; owner: waits for the owner; counter: an offer back; declined; expired. */
+  status: 'agreed' | 'owner' | 'counter' | 'declined' | 'taken';
+  reason: string;
+  actionId: number | null;
+  via: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** An Agentic Commerce Protocol checkout session (a buyer's agent buying from the catalogue). */
+export interface AcpSessionRecord {
+  id: string;
+  status: 'ready_for_payment' | 'completed' | 'canceled';
+  /** Lowercase ISO 4217, as ACP writes it. */
+  currency: string;
+  items: Array<{ id: string; quantity: number }>;
+  buyer: Record<string, unknown> | null;
+  fulfillment: Record<string, unknown> | null;
+  /** The retrofit order (and so the PayPal order) behind the session. */
+  orderId: string | null;
+  agent: string | null;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+}
+
+/** A PayPal Payouts batch retrofit sent for one bill. */
+export interface PayoutRecord {
+  batchId: string;
+  itemId: string | null;
+  legacyPk: string;
+  actionId: number | null;
+  receiver: string;
+  payee: string | null;
+  amount: number;
+  currency: string;
+  /** The item's PayPal status once known (SUCCESS, UNCLAIMED, ...); the batch's before that (PENDING). */
+  status: string;
+  transactionId: string | null;
+  fee: number | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A response to a PayPal buyer dispute, drafted from the business's own records. */
+export interface EvidenceDraft {
+  /** What the buyer claims and what the records show. */
+  summary: string;
+  recommendation: 'contest' | 'offer_partial_refund' | 'accept';
+  reasoning: string;
+  /** Sent to PayPal with the evidence (at most 2,000 characters). */
+  response: string;
+  /** PayPal evidence_type, e.g. PROOF_FOR_SOFTWARE_OR_SERVICE_DELIVERED. */
+  evidenceType: string;
+  evidence: Array<{ item: string; source: string; available: boolean }>;
+  missing: string[];
+}
+
+/** What retrofit prepared for one buyer dispute. */
+export interface DisputeCaseRecord {
+  disputeId: string;
+  legacyPk: string | null;
+  /** drafting; ready: drafted, not proposed (not contested or failed to propose); proposed: waits for the owner; submitted. */
+  status: 'drafting' | 'ready' | 'proposed' | 'submitted' | 'failed';
+  draft: EvidenceDraft | null;
+  engine: 'claude' | 'records' | null;
+  actionId: number | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** A customer's saved PayPal (PayPal Vault payment token) for paying invoices automatically. */
 export interface AutopayRecord {
   customerPk: string;
@@ -188,7 +338,7 @@ export interface AutopayRecord {
 
 export interface OutboxRecord {
   id: number;
-  kind: 'statement';
+  kind: 'statement' | 'reply';
   customerPk: string | null;
   recipient: string;
   subject: string;
@@ -556,6 +706,262 @@ export class StateStore {
   }
 
   // ---- customer messages (statements)
+  addWriteback(entity: string, legacyPk: string, kind: WritebackRecord['kind'], patch: Row) {
+    this.db
+      .prepare(`INSERT INTO writebacks (entity, legacy_pk, kind, patch, created_at) VALUES (?,?,?,?,?)`)
+      .run(entity, legacyPk, kind, JSON.stringify(patch), now());
+  }
+  listWritebacks(entity: string, legacyPk: string): WritebackRecord[] {
+    return (
+      this.db
+        .prepare(`SELECT * FROM writebacks WHERE entity = ? AND legacy_pk = ? ORDER BY id`)
+        .all(entity, legacyPk) as any[]
+    ).map((r) => ({
+      id: r.id,
+      entity: r.entity,
+      legacyPk: r.legacy_pk,
+      kind: r.kind,
+      patch: JSON.parse(r.patch),
+      createdAt: r.created_at,
+    }));
+  }
+  /** Webhook events whose payload mentions any of these PayPal ids. */
+  eventsMentioning(ids: string[]): EventRecord[] {
+    const wanted = ids.filter(Boolean);
+    if (!wanted.length) return [];
+    return (
+      this.db
+        .prepare(
+          `SELECT id, type, received_at, processed_at, status, summary, error FROM events WHERE ${wanted.map(() => 'payload LIKE ?').join(' OR ')} ORDER BY received_at`,
+        )
+        .all(...wanted.map((w) => `%${w}%`)) as any[]
+    ).map((r) => ({
+      id: r.id,
+      type: r.type,
+      receivedAt: r.received_at,
+      processedAt: r.processed_at,
+      status: r.status,
+      summary: r.summary,
+      error: r.error,
+    }));
+  }
+
+  addInbox(m: {
+    sender: string;
+    senderName?: string | null;
+    subject?: string | null;
+    body: string;
+    receivedAt?: string;
+  }) {
+    const r = this.db
+      .prepare(
+        `INSERT INTO inbox (sender, sender_name, subject, body, received_at, status) VALUES (?,?,?,?,?, 'new')`,
+      )
+      .run(m.sender, m.senderName ?? null, m.subject ?? null, m.body, m.receivedAt ?? now());
+    return Number(r.lastInsertRowid);
+  }
+  updateInbox(
+    id: number,
+    patch: Partial<
+      Pick<InboxRecord, 'customerPk' | 'reading' | 'status' | 'outcome' | 'reply' | 'repliedAt'>
+    >,
+  ) {
+    const cur = this.getInbox(id);
+    if (!cur) return null;
+    const n = { ...cur, ...patch };
+    this.db
+      .prepare(
+        `UPDATE inbox SET customer_pk=?, reading=?, status=?, outcome=?, reply=?, replied_at=? WHERE id=?`,
+      )
+      .run(
+        n.customerPk,
+        n.reading ? JSON.stringify(n.reading) : null,
+        n.status,
+        n.outcome ? JSON.stringify(n.outcome) : null,
+        n.reply,
+        n.repliedAt,
+        id,
+      );
+    return this.getInbox(id);
+  }
+  getInbox(id: number): InboxRecord | null {
+    const r = this.db.prepare(`SELECT * FROM inbox WHERE id = ?`).get(id) as any;
+    return r ? toInbox(r) : null;
+  }
+  listInbox(limit = 100): InboxRecord[] {
+    return (this.db.prepare(`SELECT * FROM inbox ORDER BY id DESC LIMIT ?`).all(limit) as any[]).map(toInbox);
+  }
+
+  saveNegotiation(n: Omit<NegotiationRecord, 'createdAt' | 'updatedAt'>) {
+    this.db
+      .prepare(
+        `INSERT INTO negotiations (id, customer_pk, legacy_pk, ask, offer, status, reason, action_id, via, created_at, updated_at)
+         VALUES (@id, @customerPk, @legacyPk, @ask, @offer, @status, @reason, @actionId, @via, @now, @now)
+         ON CONFLICT(id) DO UPDATE SET offer=excluded.offer, status=excluded.status, reason=excluded.reason,
+           action_id=excluded.action_id, updated_at=excluded.updated_at`,
+      )
+      .run({ ...n, ask: JSON.stringify(n.ask), offer: n.offer ? JSON.stringify(n.offer) : null, now: now() });
+    return this.getNegotiation(n.id)!;
+  }
+  getNegotiation(id: string): NegotiationRecord | null {
+    const r = this.db.prepare(`SELECT * FROM negotiations WHERE id = ?`).get(id) as any;
+    return r ? toNegotiation(r) : null;
+  }
+  listNegotiations(limit = 100): NegotiationRecord[] {
+    return (
+      this.db.prepare(`SELECT * FROM negotiations ORDER BY created_at DESC LIMIT ?`).all(limit) as any[]
+    ).map(toNegotiation);
+  }
+
+  saveAcpSession(s: Omit<AcpSessionRecord, 'updatedAt'>) {
+    this.db
+      .prepare(
+        `INSERT INTO acp_sessions (id, status, currency, items, buyer, fulfillment, order_id, agent, created_at, updated_at, expires_at)
+         VALUES (@id, @status, @currency, @items, @buyer, @fulfillment, @orderId, @agent, @createdAt, @now, @expiresAt)
+         ON CONFLICT(id) DO UPDATE SET status=excluded.status, items=excluded.items, buyer=excluded.buyer,
+           fulfillment=excluded.fulfillment, order_id=excluded.order_id, updated_at=excluded.updated_at`,
+      )
+      .run({
+        ...s,
+        items: JSON.stringify(s.items),
+        buyer: s.buyer ? JSON.stringify(s.buyer) : null,
+        fulfillment: s.fulfillment ? JSON.stringify(s.fulfillment) : null,
+        now: now(),
+      });
+    return this.getAcpSession(s.id)!;
+  }
+  getAcpSession(id: string): AcpSessionRecord | null {
+    const r = this.db.prepare(`SELECT * FROM acp_sessions WHERE id = ?`).get(id) as any;
+    return r
+      ? {
+          id: r.id,
+          status: r.status,
+          currency: r.currency,
+          items: JSON.parse(r.items),
+          buyer: r.buyer ? JSON.parse(r.buyer) : null,
+          fulfillment: r.fulfillment ? JSON.parse(r.fulfillment) : null,
+          orderId: r.order_id,
+          agent: r.agent,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+          expiresAt: r.expires_at,
+        }
+      : null;
+  }
+  /** ACP idempotency keys: one row per (caller and endpoint, key), with the response once there is one. */
+  getAcpIdempotency(scope: string, key: string) {
+    const r = this.db
+      .prepare(`SELECT * FROM acp_idempotency WHERE scope = ? AND key = ?`)
+      .get(scope, key) as any;
+    return r
+      ? {
+          fingerprint: r.fingerprint as string,
+          inFlight: Boolean(r.in_flight),
+          status: r.status as number | null,
+          body: r.body ? JSON.parse(r.body) : null,
+          createdAt: r.created_at as string,
+        }
+      : null;
+  }
+  /** Claims a key for a request; false when another request holds it already. */
+  beginAcpIdempotency(scope: string, key: string, fingerprint: string): boolean {
+    const r = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO acp_idempotency (scope, key, fingerprint, in_flight, created_at) VALUES (?, ?, ?, 1, ?)`,
+      )
+      .run(scope, key, fingerprint, now());
+    return r.changes === 1;
+  }
+  finishAcpIdempotency(scope: string, key: string, status: number, body: unknown) {
+    this.db
+      .prepare(`UPDATE acp_idempotency SET status = ?, body = ?, in_flight = 0 WHERE scope = ? AND key = ?`)
+      .run(status, JSON.stringify(body), scope, key);
+  }
+  dropAcpIdempotency(scope: string, key: string) {
+    this.db.prepare(`DELETE FROM acp_idempotency WHERE scope = ? AND key = ?`).run(scope, key);
+  }
+  purgeAcpIdempotency(beforeIso: string) {
+    this.db.prepare(`DELETE FROM acp_idempotency WHERE created_at < ? AND in_flight = 0`).run(beforeIso);
+  }
+
+  savePayout(p: Partial<Omit<PayoutRecord, 'createdAt' | 'updatedAt'>> & { batchId: string }) {
+    const prior = this.getPayout(p.batchId);
+    const next = {
+      itemId: null,
+      actionId: null,
+      payee: null,
+      transactionId: null,
+      fee: null,
+      error: null,
+      ...prior,
+      ...p,
+    } as Omit<PayoutRecord, 'createdAt' | 'updatedAt'>;
+    this.db
+      .prepare(
+        `INSERT INTO payouts (batch_id, item_id, legacy_pk, action_id, receiver, payee, amount, currency, status, transaction_id, fee, error, created_at, updated_at)
+         VALUES (@batchId, @itemId, @legacyPk, @actionId, @receiver, @payee, @amount, @currency, @status, @transactionId, @fee, @error, @now, @now)
+         ON CONFLICT(batch_id) DO UPDATE SET item_id=excluded.item_id, status=excluded.status, transaction_id=excluded.transaction_id,
+           fee=excluded.fee, error=excluded.error, updated_at=excluded.updated_at`,
+      )
+      .run({ ...next, now: now() });
+    return this.getPayout(p.batchId)!;
+  }
+  getPayout(batchId: string): PayoutRecord | null {
+    const r = this.db.prepare(`SELECT * FROM payouts WHERE batch_id = ?`).get(batchId) as any;
+    return r ? toPayout(r) : null;
+  }
+  findPayoutByItem(itemId: string): PayoutRecord | null {
+    const r = this.db.prepare(`SELECT * FROM payouts WHERE item_id = ?`).get(itemId) as any;
+    return r ? toPayout(r) : null;
+  }
+  listPayouts(legacyPk?: string): PayoutRecord[] {
+    const rows = legacyPk
+      ? this.db.prepare(`SELECT * FROM payouts WHERE legacy_pk = ? ORDER BY created_at DESC`).all(legacyPk)
+      : this.db.prepare(`SELECT * FROM payouts ORDER BY created_at DESC LIMIT 500`).all();
+    return (rows as any[]).map(toPayout);
+  }
+
+  saveDisputeCase(c: Partial<Omit<DisputeCaseRecord, 'createdAt' | 'updatedAt'>> & { disputeId: string }) {
+    const prior = this.getDisputeCase(c.disputeId);
+    const next = {
+      legacyPk: null,
+      status: 'drafting',
+      draft: null,
+      engine: null,
+      actionId: null,
+      error: null,
+      ...prior,
+      ...c,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO dispute_cases (dispute_id, legacy_pk, status, draft, engine, action_id, error, created_at, updated_at)
+         VALUES (@disputeId, @legacyPk, @status, @draft, @engine, @actionId, @error, @now, @now)
+         ON CONFLICT(dispute_id) DO UPDATE SET legacy_pk=excluded.legacy_pk, status=excluded.status, draft=excluded.draft,
+           engine=excluded.engine, action_id=excluded.action_id, error=excluded.error, updated_at=excluded.updated_at`,
+      )
+      .run({
+        disputeId: next.disputeId,
+        legacyPk: next.legacyPk,
+        status: next.status,
+        draft: next.draft ? JSON.stringify(next.draft) : null,
+        engine: next.engine,
+        actionId: next.actionId,
+        error: next.error,
+        now: now(),
+      });
+    return this.getDisputeCase(c.disputeId)!;
+  }
+  getDisputeCase(disputeId: string): DisputeCaseRecord | null {
+    const r = this.db.prepare(`SELECT * FROM dispute_cases WHERE dispute_id = ?`).get(disputeId) as any;
+    return r ? toDisputeCase(r) : null;
+  }
+  listDisputeCases(limit = 100): DisputeCaseRecord[] {
+    return (
+      this.db.prepare(`SELECT * FROM dispute_cases ORDER BY created_at DESC LIMIT ?`).all(limit) as any[]
+    ).map(toDisputeCase);
+  }
+
   getAutopay(customerPk: string): AutopayRecord | null {
     const r = this.db.prepare(`SELECT * FROM autopay WHERE customer_pk = ?`).get(customerPk) as any;
     return r ? toAutopay(r) : null;
@@ -872,6 +1278,72 @@ function toAutopay(r: any): AutopayRecord {
     maxAmount: r.max_amount,
     lastError: r.last_error,
     lastChargeAt: r.last_charge_at,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+function toInbox(r: any): InboxRecord {
+  return {
+    id: r.id,
+    sender: r.sender,
+    senderName: r.sender_name,
+    subject: r.subject,
+    body: r.body,
+    receivedAt: r.received_at,
+    customerPk: r.customer_pk,
+    reading: r.reading ? JSON.parse(r.reading) : null,
+    status: r.status,
+    outcome: r.outcome ? JSON.parse(r.outcome) : null,
+    reply: r.reply,
+    repliedAt: r.replied_at,
+  };
+}
+
+function toPayout(r: any): PayoutRecord {
+  return {
+    batchId: r.batch_id,
+    itemId: r.item_id,
+    legacyPk: r.legacy_pk,
+    actionId: r.action_id,
+    receiver: r.receiver,
+    payee: r.payee,
+    amount: r.amount,
+    currency: r.currency,
+    status: r.status,
+    transactionId: r.transaction_id,
+    fee: r.fee,
+    error: r.error,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+function toDisputeCase(r: any): DisputeCaseRecord {
+  return {
+    disputeId: r.dispute_id,
+    legacyPk: r.legacy_pk,
+    status: r.status,
+    draft: r.draft ? JSON.parse(r.draft) : null,
+    engine: r.engine,
+    actionId: r.action_id,
+    error: r.error,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+function toNegotiation(r: any): NegotiationRecord {
+  return {
+    id: r.id,
+    customerPk: r.customer_pk,
+    legacyPk: r.legacy_pk,
+    ask: JSON.parse(r.ask),
+    offer: r.offer ? JSON.parse(r.offer) : null,
+    status: r.status,
+    reason: r.reason,
+    actionId: r.action_id,
+    via: r.via,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

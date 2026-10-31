@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react';
-import { api, DISCREPANCY_LABEL, fmtMoney, type Config, type Discrepancy, type LedgerRow } from '../api';
+import {
+  api,
+  DISCREPANCY_LABEL,
+  fmtMoney,
+  type Config,
+  type Discrepancy,
+  type LedgerRow,
+  type TrailStep,
+} from '../api';
 import { humanize, Pill, RiskCell } from '../cells';
 
 export function RecordDrawer(props: {
@@ -13,11 +21,16 @@ export function RecordDrawer(props: {
   const { row, config, onClose, toast, onAsk, onChanged } = props;
   const [discrepancies, setDiscrepancies] = useState<Discrepancy[]>([]);
   const [installments, setInstallments] = useState(3);
+  const [trail, setTrail] = useState<TrailStep[] | null>(null);
   const cur = config.currency;
   useEffect(() => {
     api
       .discrepancies(true)
       .then((d) => setDiscrepancies(d.filter((x) => x.entity === row.entity && x.legacyPk === row.legacyPk)));
+    api
+      .trail(row.entity, row.legacyPk)
+      .then((t) => setTrail(t.steps))
+      .catch(() => setTrail([]));
   }, [row]);
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -321,6 +334,22 @@ export function RecordDrawer(props: {
               </button>
             )}
           </div>
+          {trail && trail.length > 0 && (
+            <section>
+              <h4>Money trail</h4>
+              <ol className="trail">
+                {trail.map((s, i) => (
+                  <li key={i} className={`step-${s.kind}`}>
+                    <span className="mono">{s.at.slice(0, 16).replace('T', ' ')}</span>
+                    <div>
+                      <b>{s.title}</b> <span className="muted small">{s.by}</span>
+                      {s.detail && <div className="small muted">{s.detail}</div>}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
           <p className="muted" style={{ margin: 0, fontSize: 12 }}>
             Actions go through your policies (
             {Object.entries(config.policies).filter(([, v]) => v === 'confirm').length} need approval).{' '}

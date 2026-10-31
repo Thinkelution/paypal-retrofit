@@ -1,6 +1,8 @@
 import {
+  acceptPlanOffer,
   actionLinkSecret,
   buildStatement,
+  negotiatePlan,
   createCheckout,
   loadCatalog,
   searchCatalog,
@@ -34,7 +36,7 @@ const INSTRUCTIONS = `You are talking to a small business, connected through pay
 
 Shopping: use search_catalog or list_products to find what the user wants, then create_checkout with product ids and quantities. Checkout returns a PayPal link: give it to the user and tell them to open it to review and pay. Use get_checkout_status to see whether they have paid.
 
-Existing customers: ask the user for their portal link (in any statement or invoice email from the business), then use my_invoices to see what they owe, pay_my_invoices to pay some or all of it in one PayPal checkout, and tell_the_business to promise a date, ask to pay in parts or ask a question.
+Existing customers: ask the user for their portal link (in any statement or invoice email from the business), then use my_invoices to see what they owe, pay_my_invoices to pay some or all of it in one PayPal checkout, propose_payment_plan to agree a plan within the business's rules (it may come back with a counter-offer to accept with accept_plan_offer), and tell_the_business to promise a date or ask a question.
 
 You can never pay on the user's behalf: always hand them the PayPal link. Prices and amounts are fixed by the business.`;
 
@@ -305,6 +307,66 @@ export function createShopMcpServer(rf: Retrofit, opts: ShopMcpOptions) {
       },
     },
   ];
+  accountTools.push(
+    {
+      name: 'propose_payment_plan',
+      description:
+        "Ask to pay one open invoice in parts. The business's own rules answer at once: agreed (the PayPal invoice now accepts the instalments), waiting for the owner, a counter-offer (accept it with accept_plan_offer), or declined, always with the reason.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          portal_link: portalLink,
+          invoice: { type: 'string', description: 'Invoice number' },
+          installments: { type: 'integer', minimum: 2, maximum: 12 },
+          interval_days: {
+            type: 'integer',
+            minimum: 7,
+            maximum: 92,
+            description: 'Days between payments (default 14)',
+          },
+          first_payment_date: { type: 'string', description: 'YYYY-MM-DD (default in a week)' },
+          agent: { type: 'string', description: 'Name of the assistant' },
+        },
+        required: ['portal_link', 'invoice', 'installments'],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      run: async (a: {
+        portal_link: string;
+        invoice: string;
+        installments: number;
+        interval_days?: number;
+        first_payment_date?: string;
+        agent?: string;
+      }) => {
+        const { customerPk } = customerOf(a.portal_link);
+        const s = await buildStatement(rf, customerPk);
+        const line = s.lines.find((l) => l.number.toLowerCase() === String(a.invoice).trim().toLowerCase());
+        if (!line) throw new Error(`${a.invoice} is not one of the customer's open invoices`);
+        return negotiatePlan(rf, {
+          customerPk,
+          legacyPk: line.legacyPk,
+          installments: a.installments,
+          intervalDays: a.interval_days,
+          firstDue: a.first_payment_date,
+          via: `through their AI assistant${a.agent ? ` (${String(a.agent).slice(0, 60)})` : ''}`,
+        });
+      },
+    },
+    {
+      name: 'accept_plan_offer',
+      description: 'Accept a counter-offer from propose_payment_plan, after checking with the customer.',
+      inputSchema: {
+        type: 'object',
+        properties: { portal_link: portalLink, offer_id: { type: 'string' } },
+        required: ['portal_link', 'offer_id'],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      run: async (a: { portal_link: string; offer_id: string }) => {
+        const { customerPk } = customerOf(a.portal_link);
+        return acceptPlanOffer(rf, String(a.offer_id), customerPk);
+      },
+    },
+  );
   const shopNames = new Set(tools.map((t) => t.name));
   const byName = new Map([...tools, ...accountTools].map((t) => [t.name, t]));
 

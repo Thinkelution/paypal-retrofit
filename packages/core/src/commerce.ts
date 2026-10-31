@@ -190,6 +190,8 @@ export async function finalizeCheckout(
   const rec = rf.state.getOrder(idOrPayPalId);
   if (!rec?.paypalOrderId) return null;
   if (rec.status === 'COMPLETED') return { order: rec, summary: `Order ${rec.id} already completed` };
+  if (rec.status === 'CANCELLED')
+    return { order: rec, summary: `Order ${rec.id} was cancelled; not captured` };
   let o = await rf.paypal.getOrder(rec.paypalOrderId);
   if (o.status === 'APPROVED')
     o = await rf.paypal.captureOrder(rec.paypalOrderId, `retrofit-capture-${rec.id}`);

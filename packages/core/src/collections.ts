@@ -12,6 +12,7 @@
  * engine, so reminders follow the owner's rules, daily limits and quiet hours.
  */
 import { autopayCovers, runAutopay } from './autopay.ts';
+import { ordinal, rulesFor } from './customer-rules.ts';
 import type { ActionRecord } from './types.ts';
 import type { Retrofit } from './engine.ts';
 import { loadInvoices } from './entities.ts';
@@ -107,6 +108,16 @@ export async function planCollections(rf: Retrofit, today = todayIso()): Promise
 
     if (disputes.has(inv.pk)) {
       push('hold', 'Open buyer dispute: reminders paused until it is resolved');
+      continue;
+    }
+    const ownRule = rulesFor(rf.mapping, inv).find(
+      (r) => r.noReminders || (r.noRemindersBeforeDay && Number(today.slice(8, 10)) < r.noRemindersBeforeDay),
+    );
+    if (ownRule) {
+      push(
+        'hold',
+        `Your rule: ${ownRule.note ?? (ownRule.noReminders ? 'no reminders for this customer' : `no reminders before the ${ordinal(ownRule.noRemindersBeforeDay!)}`)}`,
+      );
       continue;
     }
     if (autopayCovers(rf, inv.customerPk, inv.pk, amountDue)) {

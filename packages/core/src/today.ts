@@ -4,6 +4,7 @@ import { KIND_LABEL } from './digest.ts';
 import type { Retrofit } from './engine.ts';
 import { goLiveChecks } from './golive.ts';
 import { ledger, summary } from './ledger.ts';
+import { payablesView } from './payouts.ts';
 import { listCustomers } from './statements.ts';
 import { addDaysIso, round2, todayIso } from './util.ts';
 
@@ -94,20 +95,80 @@ export async function todayView(rf: Retrofit, opts: { claude: boolean; today?: s
       }),
     });
 
+  const emails = rf.state.listInbox(100).filter((m) => m.status === 'needs_owner');
+  if (emails.length)
+    needs.push({
+      id: 'inbox',
+      tone: 'warn',
+      title: `${plural(emails.length, 'customer email')} ${emails.length === 1 ? 'needs' : 'need'} you`,
+      detail: 'Payments they say they made, complaints, and anything retrofit should not decide on its own.',
+      go: 'inbox',
+      label: 'Read',
+      items: emails.slice(0, 3).map((m) => ({
+        label: `${m.senderName ?? m.sender}: ${String(m.reading?.summary ?? m.subject ?? '').slice(0, 80)}`,
+      })),
+    });
+
   const discrepancies = rf.state.listDiscrepancies();
   const disputes = discrepancies.filter((d) => d.kind === 'dispute');
-  if (disputes.length)
+  if (disputes.length) {
+    const ready = disputes.filter(
+      (d) => d.paypalId && rf.state.getDisputeCase(d.paypalId)?.status === 'proposed',
+    );
     needs.push({
       id: 'disputes',
       tone: 'bad',
-      title: `${plural(disputes.length, 'customer')} opened a PayPal dispute`,
-      detail:
-        'Respond in time or PayPal may decide for the buyer. Claude can draft the response from your records.',
-      go: 'discrepancies',
-      label: 'Respond',
+      title: ready.length
+        ? `Dispute evidence is ready for your OK (${plural(ready.length, 'dispute')})`
+        : `${plural(disputes.length, 'customer')} opened a PayPal dispute`,
+      detail: ready.length
+        ? 'Retrofit drafted the response from your own records. Check it, add anything missing, then send it to PayPal.'
+        : 'Respond in time or PayPal may decide for the buyer. Retrofit drafts the response from your records.',
+      go: 'disputes',
+      label: ready.length ? 'Review evidence' : 'Respond',
     });
-  // Invoices not sent yet are the "ready to send" card, not a mismatch.
-  const mismatches = discrepancies.filter((d) => d.kind !== 'dispute' && d.kind !== 'not_in_paypal').length;
+  }
+
+  const bills = await payablesView(rf, today);
+  if (bills.enabled) {
+    const soon = bills.bills.filter(
+      (b) =>
+        b.state === 'open' &&
+        !b.payout &&
+        b.daysToDue != null &&
+        b.daysToDue <= 7 &&
+        b.action?.status !== 'pending',
+    );
+    const unclaimed = discrepancies.filter(
+      (d) => d.kind === 'payout_unclaimed' || d.kind === 'payout_failed',
+    );
+    if (soon.length || unclaimed.length)
+      needs.push({
+        id: 'bills',
+        tone: unclaimed.length ? 'warn' : 'info',
+        title: [
+          soon.length ? `${plural(soon.length, 'bill')} due this week` : '',
+          unclaimed.length ? `${plural(unclaimed.length, 'payout')} not received` : '',
+        ]
+          .filter(Boolean)
+          .join(' and '),
+        detail:
+          'Pay suppliers and contractors with PayPal Payouts; new payees and changed PayPal emails always wait for you.',
+        go: 'bills',
+        label: 'Pay bills',
+        items: soon
+          .slice(0, 3)
+          .map((b) => ({
+            label: `${b.number} · ${b.payee}`,
+            sub: b.due ? `due ${b.due}` : undefined,
+            amount: b.amount,
+          })),
+      });
+  }
+  // Invoices not sent yet are the "ready to send" card, not a mismatch; payouts have their own card.
+  const mismatches = discrepancies.filter(
+    (d) => d.kind !== 'dispute' && d.kind !== 'not_in_paypal' && !d.kind.startsWith('payout_'),
+  ).length;
   if (mismatches)
     needs.push({
       id: 'mismatches',
@@ -198,10 +259,11 @@ export async function todayView(rf: Retrofit, opts: { claude: boolean; today?: s
     });
   for (const a of rf.state.listActions('executed', 30)) {
     if (['update_invoice', 'expire_discount', 'create_invoice', 'record_payment'].includes(a.kind)) continue;
+    const inv = a.target.entity === 'invoice' ? byPk.get(a.target.legacyPk) : undefined;
     recent.push({
       at: a.decidedAt ?? a.createdAt,
       kind: 'action',
-      text: `${KIND_LABEL[a.kind] ?? a.kind}: ${a.target.label ?? a.target.legacyPk}${byPk.get(a.target.legacyPk) ? ` (${byPk.get(a.target.legacyPk)!.customer})` : ''}`,
+      text: `${KIND_LABEL[a.kind] ?? a.kind}: ${a.target.label ?? a.target.legacyPk}${inv ? ` (${inv.customer})` : ''}`,
     });
   }
   for (const r of rf.state.listRequests().slice(0, 10)) {

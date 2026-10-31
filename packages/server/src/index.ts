@@ -1,7 +1,8 @@
 import {
   AgentUnavailableError,
   claudeConfigured,
-  draftDisputeResponse,
+  compileRules,
+  draftDisputeEvidence,
   draftInvoice,
   draftReminders,
   OpsAgent,
@@ -52,8 +53,27 @@ import {
   runAutopay,
   stopAutopay,
   goLiveChecks,
+  moneyTrail,
+  PlanPolicy,
+  applyRuleChanges,
+  shadowReplay,
+  describeRules,
+  previewRules,
+  businessTimezone as tzOf,
+  type RuleChange,
   todayView,
   WEBHOOK_EVENTS,
+  disputeEvidencePack,
+  evidencePdf,
+  listDisputes,
+  prepareDisputeCase,
+  proposeEvidence,
+  SELLER_EVIDENCE_TYPES,
+  startDisputeAutopilot,
+  type EvidencePack,
+  payablesView,
+  proposeBillPayments,
+  refreshPayouts,
 } from '@paypal-retrofit/core';
 import nodemailer from 'nodemailer';
 import express, { type NextFunction, type Request, type Response } from 'express';
@@ -64,6 +84,8 @@ import { fileURLToPath } from 'node:url';
 import { approvalPage, type ApprovalPageInput } from './approval-page.ts';
 import { portalRouter, shopRouter } from './portal.ts';
 import { demoSitePage, qrRoutes, widgetRouter } from './widget.ts';
+import { inboundRouter, inboxRoutes } from './inbox.ts';
+import { acpRouter } from './acp.ts';
 import { digestChannels, digestSchedule, prepareDigest, runScheduledDigest, sendDigest } from './digest.ts';
 
 export * from './digest.ts';
@@ -99,6 +121,9 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
   const app = express();
   app.disable('x-powered-by');
   const ops = new OpsAgent(rf);
+  // New disputes get a drafted response and a proposal to send the evidence (Claude when configured).
+  const disputeDrafter = (pack: EvidencePack) => draftDisputeEvidence(pack, rf.config.business.name);
+  const stopAutopilot = startDisputeAutopilot(rf, () => (claudeConfigured() ? disputeDrafter : undefined));
   let schemaCache: SchemaDescription | null = null;
   const timers: NodeJS.Timeout[] = [];
 
@@ -207,10 +232,13 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
   app.use(shopRouter(rf, publicCtx));
   // The business's own website: one script tag adds "Pay a bill", Pay buttons and the shop.
   app.use(widgetRouter(rf, publicCtx));
+  app.use(inboundRouter(rf));
   if (opts.demo && !opts.demo.custom)
     app.get('/site', (_req, res) =>
       res.type('html').send(demoSitePage(rf.config.business.name, opts.demo?.legacyAppPath)),
     );
+  // Agentic Commerce Protocol: discovery, the checkout API and its MCP binding (Bearer token of its own).
+  app.use(acpRouter(rf, (req) => baseFor(req)));
   app.post('/mcp/shop', express.json({ limit: '256kb' }), (req, res, next) => {
     void shopMcpHttpHandler(
       () => rf,
@@ -266,6 +294,7 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
   );
   api.use(express.json({ limit: '1mb' }));
   api.use(qrRoutes(rf));
+  api.use(inboxRoutes(rf));
   api.post(
     '/invoices',
     wrap(async (req, res) => {
@@ -412,9 +441,81 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
     ops.reset(String(req.body?.sessionId ?? 'default'));
     res.json({ ok: true });
   });
+  // ---- bills to pay: PayPal Payouts to suppliers and contractors
+  api.get(
+    '/payables',
+    wrap(async (_req, res) => {
+      await refreshPayouts(rf);
+      res.json(await payablesView(rf));
+    }),
+  );
   api.post(
-    '/disputes/:id/draft',
-    wrap(async (req, res) => res.json(await draftDisputeResponse(rf, req.params.id!))),
+    '/payables/pay',
+    wrap(async (req, res) => {
+      const pks = Array.isArray(req.body?.pks) ? req.body.pks.map(String) : [];
+      if (!pks.length) return res.status(400).json({ error: 'Choose at least one bill' });
+      res.json({ results: await proposeBillPayments(rf, pks, 'dashboard') });
+    }),
+  );
+
+  // ---- disputes: the evidence autopilot's cases
+  api.get(
+    '/disputes',
+    wrap(async (_req, res) =>
+      res.json({ disputes: await listDisputes(rf), evidenceTypes: SELLER_EVIDENCE_TYPES }),
+    ),
+  );
+  api.get(
+    '/disputes/:id',
+    wrap(async (req, res) => {
+      const id = req.params.id!;
+      const c = rf.state.getDisputeCase(id);
+      res.json({
+        pack: await disputeEvidencePack(rf, id),
+        case: c,
+        action: (c?.actionId && rf.state.getAction(c.actionId)) || null,
+      });
+    }),
+  );
+  api.post(
+    '/disputes/:id/prepare',
+    wrap(async (req, res) =>
+      res.json(
+        await prepareDisputeCase(rf, req.params.id!, {
+          drafter: claudeConfigured() ? disputeDrafter : undefined,
+          origin: 'dashboard',
+          redraft: true,
+        }),
+      ),
+    ),
+  );
+  api.post(
+    '/disputes/:id/evidence',
+    wrap(async (req, res) => {
+      try {
+        res.json(
+          await proposeEvidence(rf, req.params.id!, {
+            origin: 'dashboard',
+            response: req.body?.response != null ? String(req.body.response) : undefined,
+            evidenceType: req.body?.evidenceType ? String(req.body.evidenceType) : undefined,
+          }),
+        );
+      } catch (e) {
+        res.status(400).json({ error: (e as Error).message });
+      }
+    }),
+  );
+  // The document PayPal would get with the current response.
+  api.get(
+    '/disputes/:id/evidence.pdf',
+    wrap(async (req, res) => {
+      const id = req.params.id!;
+      const pack = await disputeEvidencePack(rf, id);
+      const response = rf.state.getDisputeCase(id)?.draft?.response ?? '';
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${id.replace(/[^\w-]/g, '_')}-evidence.pdf"`);
+      res.send(evidencePdf(pack, response, rf.config.business.name));
+    }),
   );
 
   // Live updates for the dashboard.
@@ -602,6 +703,104 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
     wrap(async (_req, res) => res.json(await todayView(rf, { claude: claudeConfigured() }))),
   );
 
+  // ---- payment plans the business agrees to, and negotiations with customers' assistants
+  api.get('/plans/policy', (_req, res) => res.json(rf.mapping.plans));
+  api.put('/plans/policy', (req, res) => {
+    const parsed = PlanPolicy.safeParse({ ...rf.mapping.plans, ...(req.body ?? {}) });
+    if (!parsed.success)
+      return res.status(422).json({ error: parsed.error.issues.map((i) => i.message).join('; ') });
+    rf.mapping = { ...rf.mapping, plans: parsed.data };
+    saveMapping(rf.config, rf.mapping);
+    rf.emit('mapping', {});
+    res.json(rf.mapping.plans);
+  });
+  api.get(
+    '/negotiations',
+    wrap(async (_req, res) => {
+      const names = new Map((await listCustomers(rf)).map((c) => [c.pk, c.name]));
+      const numbers = new Map((await ledger(rf)).map((r) => [r.legacyPk, r.number]));
+      res.json(
+        rf.state.listNegotiations(100).map((n) => ({
+          ...n,
+          customer: names.get(n.customerPk) ?? n.customerPk,
+          invoice: numbers.get(n.legacyPk) ?? n.legacyPk,
+        })),
+      );
+    }),
+  );
+
+  // ---- the owner's rules in plain English: compile, preview what changes today, then apply
+  const ruleCustomers = async () => (await listCustomers(rf)).map((c) => ({ key: c.pk, name: c.name }));
+  api.get(
+    '/rules',
+    wrap(async (_req, res) => res.json({ sentences: describeRules(rf.mapping, await ruleCustomers()) })),
+  );
+  api.post(
+    '/rules/preview',
+    wrap(async (req, res) => {
+      const text = String(req.body?.text ?? '').trim();
+      if (!text) return res.status(422).json({ error: 'Write what you want, in your own words.' });
+      const compiled = await compileRules(text, {
+        currency: rf.mapping.currency,
+        customers: await ruleCustomers(),
+      });
+      let candidate;
+      try {
+        candidate = applyRuleChanges(rf.mapping, compiled.changes, tzOf(rf));
+      } catch (e) {
+        return res
+          .status(422)
+          .json({ ...compiled, error: `Those rules don't fit together: ${(e as Error).message}` });
+      }
+      res.json({ ...compiled, preview: await previewRules(rf, candidate) });
+    }),
+  );
+  api.post(
+    '/rules/apply',
+    wrap(async (req, res) => {
+      const changes = (req.body?.changes ?? []) as RuleChange[];
+      if (!Array.isArray(changes) || !changes.length)
+        return res.status(422).json({ error: 'Nothing to apply' });
+      try {
+        rf.mapping = applyRuleChanges(rf.mapping, changes, tzOf(rf));
+      } catch (e) {
+        return res.status(422).json({ error: (e as Error).message });
+      }
+      saveMapping(rf.config, rf.mapping);
+      rf.emit('mapping', {});
+      res.json({ sentences: describeRules(rf.mapping, await ruleCustomers()) });
+    }),
+  );
+
+  // ---- shadow mode: what the current rules would have done over the last N days, without touching anything
+  api.get(
+    '/shadow',
+    wrap(async (req, res) =>
+      res.json(
+        await shadowReplay(rf, {
+          days: Number(req.query.days ?? 90),
+          daysAfterReminder: Number(req.query.after ?? 7),
+        }),
+      ),
+    ),
+  );
+
+  // ---- the money trail for one invoice or subscription
+  api.get(
+    '/trail/:entity/:pk',
+    wrap(async (req, res) =>
+      res.json(
+        await moneyTrail(
+          rf,
+          req.params.entity === 'subscription' || req.params.entity === 'payable'
+            ? req.params.entity
+            : 'invoice',
+          String(req.params.pk),
+        ),
+      ),
+    ),
+  );
+
   // ---- go-live checklist
   api.get(
     '/golive',
@@ -738,6 +937,7 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
     app,
     stop() {
       for (const t of timers) clearInterval(t);
+      stopAutopilot();
     },
   };
 }

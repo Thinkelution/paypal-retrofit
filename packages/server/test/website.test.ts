@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { actionLinkSecret, ledger, signPortalToken } from '../../core/src/index.ts';
+import { actionLinkSecret, ledger, signPortalToken, WEBHOOK_EVENTS } from '../../core/src/index.ts';
 import { harness, listen } from '../../core/test/helpers.ts';
 import { createServer } from '../src/index.ts';
 
@@ -85,7 +85,7 @@ describe('website widget and paper', () => {
     expect(by(after, 'writeback')).toMatchObject({ status: 'done' });
     expect(after.done).toBeGreaterThan(before.done);
     const reg = await fetch(`${url}/api/golive/webhook`, { method: 'POST' });
-    expect(((await reg.json()) as any).events).toBe(19);
+    expect(((await reg.json()) as any).events).toBe(WEBHOOK_EVENTS.length);
   });
 
   it('prints PayPal QR codes on pay slips and statements', async () => {

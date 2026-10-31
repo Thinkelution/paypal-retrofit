@@ -11,6 +11,8 @@ import {
 import { type RetrofitMapping } from './mapping/schema.ts';
 import { buildStatement, renderStatement } from './statements.ts';
 import { chargeAutopay } from './autopay.ts';
+import { submitDisputeEvidence } from './disputes.ts';
+import { billAmount, paySupplier, supplierHold } from './payouts.ts';
 import { earlyDiscountFor } from './terms.ts';
 import { decidePolicy, describeLocal, type PolicyDecision } from './policy.ts';
 import {
@@ -53,6 +55,11 @@ export interface ProposeInput {
   target: ActionTarget;
   payload?: Record<string, unknown>;
   reason: string;
+  /**
+   * A setting the owner made that already agrees to this (for example the payment plans they accept without
+   * being asked). Set only by retrofit's own code after checking that setting, never by agents.
+   */
+  ownerRule?: string;
 }
 
 export interface RetrofitDeps {
@@ -61,6 +68,16 @@ export interface RetrofitDeps {
   state?: StateStore;
   mapping?: RetrofitMapping;
 }
+
+const FROM_EMAIL_NEEDS_OWNER: ActionKind[] = [
+  'record_payment',
+  'create_refund',
+  'cancel_invoice',
+  'accept_dispute',
+  'offer_payment_plan',
+  'charge_autopay',
+  'pay_supplier',
+];
 
 export class Retrofit {
   readonly source: SourceAdapter;
@@ -139,6 +156,8 @@ export class Retrofit {
     target: ActionTarget,
     payload: Record<string, unknown>,
   ): Promise<number | null> {
+    // A bill's amount comes from the business's records, whatever the proposer says.
+    if (kind === 'pay_supplier') return billAmount(this, target.legacyPk);
     if (payload.amount !== undefined && payload.amount !== null && Number.isFinite(Number(payload.amount)))
       return Number(payload.amount);
     if (target.entity === 'subscription') {
@@ -284,6 +303,31 @@ export class Retrofit {
     const payload = input.payload ?? {};
     const amount = await this.actionAmount(input.kind, input.target, payload);
     const d = this.decide(input.kind, amount);
+    // An email can be forged: anything from one that moves money or closes an invoice waits for the owner.
+    if (input.origin === 'inbox' && d.mode === 'auto' && FROM_EMAIL_NEEDS_OWNER.includes(input.kind)) {
+      d.mode = 'confirm';
+      d.reason = `${d.reason}; it came from an email, so it waits for you`;
+    }
+    if (input.ownerRule && d.mode === 'confirm') {
+      d.mode = 'auto';
+      d.reason = input.ownerRule;
+    }
+    // Money out to a payee never seen before, or to a PayPal email that changed, waits for the owner: that is
+    // how invoice-redirect fraud works.
+    if (input.kind === 'pay_supplier' && d.mode !== 'never') {
+      const hold = await supplierHold(this, input.target.legacyPk);
+      if (hold && d.mode === 'auto') {
+        d.mode = 'confirm';
+        d.reason = `${hold}, so it waits for you`;
+      } else if (hold) d.reason = `${d.reason}. Check first: ${hold}`;
+    }
+    // Evidence in a buyer dispute is the business's word to PayPal: it never goes without the owner's OK.
+    if (input.kind === 'submit_dispute_evidence' && d.mode === 'auto') {
+      d.mode = 'confirm';
+      d.reason = 'Dispute evidence always waits for your OK';
+    }
+    const { ownerRule: _ownerRule, ...stored } = input;
+    input = stored;
     if (d.mode === 'never') {
       const a = this.state.createAction({
         ...input,
@@ -475,6 +519,10 @@ export class Retrofit {
         return this.sendStatement(pk);
       case 'charge_autopay':
         return chargeAutopay(this, pk);
+      case 'submit_dispute_evidence':
+        return submitDisputeEvidence(this, a.payload);
+      case 'pay_supplier':
+        return paySupplier(this, a.id, pk, a.payload);
       case 'accept_dispute': {
         const disputeId = String(a.payload.disputeId ?? '');
         if (!disputeId) throw new Error('disputeId is required');
@@ -859,6 +907,7 @@ export class Retrofit {
     }
     if (Object.keys(patch).length === 0) return;
     await this.source.update(em.table, em.pk, pk, patch);
+    this.state.addWriteback(entity, pk, 'update', patch);
     this.emit('writeback', { entity, pk, patch });
   }
 

@@ -11,7 +11,6 @@ import {
 } from './api';
 import { AgentPanel } from './components/AgentPanel';
 import { CommandPalette, type Command } from './components/CommandPalette';
-import { DisputeDraft } from './components/DisputeDraft';
 import { McpConnect } from './components/McpConnect';
 import { NewInvoice } from './components/NewInvoice';
 import { RecordDrawer } from './components/RecordDrawer';
@@ -32,6 +31,11 @@ import { Practice } from './pages/Practice';
 import { Today } from './pages/Today';
 import { GoLive } from './pages/GoLive';
 import { Website } from './pages/Website';
+import { Inbox } from './pages/Inbox';
+import { Rules } from './pages/Rules';
+import { Shadow } from './pages/Shadow';
+import { Bills } from './pages/Bills';
+import { Disputes } from './pages/Disputes';
 
 type Tab =
   | 'today'
@@ -39,10 +43,15 @@ type Tab =
   | 'collections'
   | 'insights'
   | 'discrepancies'
+  | 'disputes'
+  | 'bills'
   | 'customers'
+  | 'inbox'
   | 'shop'
   | 'website'
   | 'approvals'
+  | 'rules'
+  | 'shadow'
   | 'digest'
   | 'golive'
   | 'mapping'
@@ -58,12 +67,15 @@ const NAV: Array<{ group: string; items: Array<[Tab, string]> }> = [
       ['collections', 'Collections'],
       ['insights', 'Cash & risk'],
       ['discrepancies', 'Mismatches'],
+      ['disputes', 'Disputes'],
+      ['bills', 'Bills to pay'],
     ],
   },
   {
     group: 'Customers',
     items: [
       ['customers', 'Customers'],
+      ['inbox', 'Inbox'],
       ['shop', 'Shop'],
       ['website', 'Website & QR'],
     ],
@@ -72,6 +84,8 @@ const NAV: Array<{ group: string; items: Array<[Tab, string]> }> = [
     group: 'Your call',
     items: [
       ['approvals', 'Approvals'],
+      ['rules', 'Rules'],
+      ['shadow', 'Shadow mode'],
       ['digest', 'Morning digest'],
     ],
   },
@@ -350,6 +364,34 @@ function Console({ dark, canSetup, host }: { dark: boolean; canSetup: boolean; h
         },
       },
       {
+        id: 'rules',
+        group: 'Do',
+        label: 'Change my rules in plain English',
+        keywords: 'policy approve limit quiet hours late fee',
+        run: () => setTab('rules'),
+      },
+      {
+        id: 'shadow',
+        group: 'Do',
+        label: 'Replay the last 90 days with my rules (shadow mode)',
+        keywords: 'simulate what if test',
+        run: () => setTab('shadow'),
+      },
+      {
+        id: 'email',
+        group: 'Do',
+        label: 'Read a customer email',
+        keywords: 'inbox mail promise cheque',
+        run: () => setTab('inbox'),
+      },
+      {
+        id: 'bills',
+        group: 'Do',
+        label: 'Pay suppliers with PayPal',
+        keywords: 'bills payouts contractors vendors',
+        run: () => setTab('bills'),
+      },
+      {
         id: 'mcp',
         group: 'Do',
         label: 'Connect Claude (MCP)',
@@ -625,9 +667,28 @@ function Console({ dark, canSetup, host }: { dark: boolean; canSetup: boolean; h
               rows={ledger.data}
               toast={toast}
               onAsk={ask}
-              onDraft={setDispute}
+              onDraft={(id) => {
+                setDispute(id);
+                setTab('disputes');
+              }}
             />
           )}
+          {tab === 'disputes' && (
+            <Disputes config={config} rows={ledger.data} initial={dispute} toast={toast} />
+          )}
+          {tab === 'bills' && (
+            <Bills
+              config={config}
+              toast={(m) => {
+                toast(m);
+                refresh();
+              }}
+              onGo={(t) => setTab(t as Tab)}
+            />
+          )}
+          {tab === 'inbox' && <Inbox toast={toast} onGo={(t) => setTab(t as Tab)} />}
+          {tab === 'rules' && <Rules toast={toast} />}
+          {tab === 'shadow' && <Shadow config={config} onGo={(t) => setTab(t as Tab)} />}
           {tab === 'collections' && (
             <Collections
               dark={dark}
@@ -695,7 +756,6 @@ function Console({ dark, canSetup, host }: { dark: boolean; canSetup: boolean; h
         />
       )}
       {touring && <Tour onClose={() => setTouring(false)} />}
-      {dispute && <DisputeDraft disputeId={dispute} onClose={() => setDispute(null)} />}
       {mcpOpen && <McpConnect business={config.business.name} onClose={() => setMcpOpen(false)} />}
       {!agentOpen && (
         <button className="btn primary fab" onClick={() => setAgentOpen(true)}>

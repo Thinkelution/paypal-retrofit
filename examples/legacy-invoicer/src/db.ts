@@ -56,6 +56,18 @@ CREATE TABLE IF NOT EXISTS retainers (
   status TEXT NOT NULL CHECK (status IN ('pending','active','cancelled')),
   paypal_subscription_id TEXT
 );
+CREATE TABLE IF NOT EXISTS bills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bill_no TEXT NOT NULL UNIQUE,
+  payee TEXT NOT NULL,
+  payee_email TEXT NOT NULL,
+  description TEXT,
+  amount REAL NOT NULL,
+  due_on TEXT,
+  status TEXT NOT NULL CHECK (status IN ('open','paid','void')),
+  paid_on TEXT,
+  payout_ref TEXT
+);
 `;
 
 export function openDb(file = DEFAULT_DB_PATH): Database.Database {

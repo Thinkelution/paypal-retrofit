@@ -255,7 +255,23 @@ export function Shop({ dark, config, toast }: { dark: boolean; config: Config; t
             <li>
               Buyer MCP endpoint <code>{data.mcpUrl}</code>
             </li>
+            <li>
+              Open checkout standard (ACP){' '}
+              <a
+                href={`${data.shopUrl.replace(/\/shop$/, '')}/.well-known/acp.json`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                acp.json ↗
+              </a>
+            </li>
           </ul>
+          <p className="muted small">
+            Any agent that speaks the Agentic Commerce Protocol can check out here too: checkout sessions at{' '}
+            <code>{data.shopUrl.replace(/\/shop$/, '')}/acp</code> (and the same five tools over MCP at{' '}
+            <code>/acp/mcp</code>), paid with a PayPal order the buyer approves. Set{' '}
+            <code>RETROFIT_ACP_TOKEN</code> for the agents you work with.
+          </p>
           <p className="muted small">
             A shopping assistant (Claude or any MCP client) gets four tools: <code>list_products</code>,{' '}
             <code>search_catalog</code>, <code>create_checkout</code> (returns a PayPal link for the person to
