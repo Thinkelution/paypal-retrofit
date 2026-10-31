@@ -53,10 +53,12 @@ export function Setup({
   const [error, setError] = useState<string | null>(null);
 
   // step 1
-  const [kind, setKind] = useState<'csv' | 'sample' | 'sqlite' | 'postgres'>('csv');
+  const [kind, setKind] = useState<'csv' | 'gsheet' | 'sample' | 'sqlite' | 'postgres' | 'mysql'>('csv');
   const [files, setFiles] = useState<File[]>([]);
   const [sqlitePath, setSqlitePath] = useState('');
   const [pgUrl, setPgUrl] = useState('');
+  const [mysqlUrl, setMysqlUrl] = useState('');
+  const [sheetUrl, setSheetUrl] = useState('');
   const [session, setSession] = useState<{ id: string; label: string; schema: SchemaView } | null>(null);
 
   // step 2
@@ -95,13 +97,21 @@ export function Setup({
     act('connect', async () => {
       let body: unknown;
       if (kind === 'csv') {
-        if (!files.length) throw new Error('Choose one or more CSV files first.');
+        if (!files.length) throw new Error('Choose an Excel workbook or CSV files first.');
         body = {
           kind,
-          files: await Promise.all(files.map(async (f) => ({ name: f.name, content: await f.text() }))),
+          files: await Promise.all(
+            files.map(async (f) =>
+              /\.xlsx$/i.test(f.name)
+                ? { name: f.name, content: toBase64(await f.arrayBuffer()), encoding: 'base64' }
+                : { name: f.name, content: await f.text() },
+            ),
+          ),
         };
       } else if (kind === 'sample') body = { kind };
+      else if (kind === 'gsheet') body = { kind, url: sheetUrl };
       else if (kind === 'sqlite') body = { kind, path: sqlitePath };
+      else if (kind === 'mysql') body = { kind, url: mysqlUrl };
       else body = { kind, url: pgUrl };
       const s = await api.setup.source(body);
       setSession(s);
@@ -244,10 +254,22 @@ export function Setup({
             <div className="choice-grid">
               <label className={`choice ${kind === 'csv' ? 'on' : ''}`}>
                 <input type="radio" name="kind" checked={kind === 'csv'} onChange={() => setKind('csv')} />
-                <b>Upload CSV exports</b>
+                <b>Upload a spreadsheet</b>
                 <span className="muted">
-                  One file per table: customers, invoices, line items. Most invoicing tools and spreadsheets
-                  can export these.
+                  An Excel workbook (.xlsx), or CSV exports with one file per table. One sheet with everything
+                  works too.
+                </span>
+              </label>
+              <label className={`choice ${kind === 'gsheet' ? 'on' : ''}`}>
+                <input
+                  type="radio"
+                  name="kind"
+                  checked={kind === 'gsheet'}
+                  onChange={() => setKind('gsheet')}
+                />
+                <b>Connect a Google Sheet</b>
+                <span className="muted">
+                  Paste its link. retrofit re-reads it on every sync, so new rows become PayPal invoices.
                 </span>
               </label>
               <label className={`choice ${kind === 'sample' ? 'on' : ''}`}>
@@ -292,6 +314,18 @@ export function Setup({
                       A connection URL. Agent queries run in read-only transactions.
                     </span>
                   </label>
+                  <label className={`choice ${kind === 'mysql' ? 'on' : ''}`}>
+                    <input
+                      type="radio"
+                      name="kind"
+                      checked={kind === 'mysql'}
+                      onChange={() => setKind('mysql')}
+                    />
+                    <b>MySQL or MariaDB</b>
+                    <span className="muted">
+                      The database behind most PHP and WordPress-era business apps.
+                    </span>
+                  </label>
                 </>
               )}
             </div>
@@ -302,12 +336,12 @@ export function Setup({
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault();
-                  setFiles([...e.dataTransfer.files].filter((f) => /\.csv$/i.test(f.name)));
+                  setFiles([...e.dataTransfer.files].filter((f) => /\.(csv|xlsx)$/i.test(f.name)));
                 }}
               >
                 <input
                   type="file"
-                  accept=".csv,text/csv"
+                  accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                   multiple
                   onChange={(e) => setFiles([...(e.target.files ?? [])])}
                 />
@@ -320,10 +354,33 @@ export function Setup({
                   </span>
                 ) : (
                   <span>
-                    Drop CSV files here or <u>choose files</u>
+                    Drop an Excel workbook or CSV files here, or <u>choose files</u>
                   </span>
                 )}
               </label>
+            )}
+            {kind === 'gsheet' && (
+              <>
+                <input
+                  className="search wide"
+                  placeholder="https://docs.google.com/spreadsheets/d/…"
+                  value={sheetUrl}
+                  onChange={(e) => setSheetUrl(e.target.value)}
+                />
+                <p className="muted small">
+                  In Google Sheets press <b>Share</b> and set General access to <b>Anyone with the link</b>{' '}
+                  (Viewer). retrofit only reads the sheet: PayPal ids, pay links and payments are kept in
+                  retrofit and in a copy you can download.
+                </p>
+              </>
+            )}
+            {kind === 'mysql' && (
+              <input
+                className="search wide"
+                placeholder="mysql://user:password@host:3306/db"
+                value={mysqlUrl}
+                onChange={(e) => setMysqlUrl(e.target.value)}
+              />
             )}
             {kind === 'sqlite' && (
               <input
@@ -749,4 +806,11 @@ export function Setup({
       )}
     </div>
   );
+}
+
+function toBase64(buf: ArrayBuffer) {
+  const bytes = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
 }

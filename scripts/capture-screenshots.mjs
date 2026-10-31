@@ -102,9 +102,54 @@ async function session() {
   };
 }
 
+// Fills a text box the way a person would (React listens for input events).
+const typeInto = (selector, text) => `(() => {
+  const el = document.querySelector(${JSON.stringify(selector)});
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${JSON.stringify(text)});
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+})()`;
+
 const SHOTS = [
   { file: 'console.png', url: '/', w: 1440, h: 900 },
-  { file: 'drawer.png', url: '/', w: 1440, h: 900, click: 'INV-1022' },
+  { file: 'invoices.png', url: '/#ledger', w: 1440, h: 900 },
+  { file: 'drawer.png', url: '/#ledger', w: 1440, h: 900, click: 'INV-1022' },
+  { file: 'golive.png', url: '/#golive', w: 1440, h: 1000 },
+  { file: 'website.png', url: '/#website', w: 1440, h: 900 },
+  {
+    file: 'newinvoice.png',
+    url: '/',
+    w: 1440,
+    h: 820,
+    clicks: ['+ New invoice'],
+    script: typeInto('.ni-text', 'Invoice Maya Okafor 2 hours at $95 for retouching, due Friday'),
+    after: ['Read it'],
+  },
+  {
+    file: 'palette.png',
+    url: '/',
+    w: 1440,
+    h: 760,
+    script: `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }));`,
+    script2: typeInto('.palette input', 'invoice Harbor View $420 for the boiler service'),
+  },
+  {
+    file: 'site.png',
+    url: '/site',
+    w: 1280,
+    h: 860,
+    scheme: 'light',
+    script: `(() => {
+      const root = [...document.body.children].map((e) => e.shadowRoot).find((r) => r?.querySelector('.fab'));
+      root.querySelector('.fab').click();
+      setTimeout(() => {
+        const [num, email] = root.querySelectorAll('input');
+        num.value = 'INV-1050';
+        email.value = 'maya.okafor@example.com';
+        root.querySelector('form').requestSubmit();
+      }, 300);
+    })()`,
+  },
   { file: 'collections.png', url: '/#collections', w: 1440, h: 900 },
   { file: 'insights.png', url: '/#insights', w: 1440, h: 1180 },
   { file: 'mapping.png', url: '/#mapping', w: 1440, h: 1000 },
@@ -113,6 +158,7 @@ const SHOTS = [
   { file: 'webhooks.png', url: '/#activity', w: 1440, h: 760 },
   { file: 'legacy.png', url: '/fernhill/', w: 1280, h: 800, scheme: 'light' },
   { file: 'mobile.png', url: '/', w: 390, h: 844, mobile: true },
+  { file: 'autopay.png', url: '/#customers', w: 1440, h: 1000 },
   { file: 'digest.png', url: '/#digest', w: 1440, h: 1000 },
   { file: 'customers.png', url: '/c/brightside/#customers', w: 1440, h: 1000 },
   { file: 'shop.png', url: '/#shop', w: 1440, h: 1000 },
@@ -155,7 +201,15 @@ try {
   const customers = await (await fetch(`${base}/c/brightside/api/customers`)).json().catch(() => []);
   const portal = customers.find?.((c) => c.name === 'Rockridge Florist')?.portalUrl;
   if (portal)
-    SHOTS.push({ file: 'portal.png', url: new URL(portal).pathname, w: 900, h: 900, scheme: 'light' });
+    SHOTS.push({ file: 'portal.png', url: new URL(portal).pathname, w: 900, h: 1180, scheme: 'light' });
+  if (unpaid)
+    SHOTS.push({
+      file: 'slip.png',
+      url: `/api/invoices/${unpaid.legacyPk}/slip`,
+      w: 900,
+      h: 460,
+      scheme: 'light',
+    });
   if (unpaid?.payLink)
     SHOTS.push({
       file: 'pay.png',
@@ -168,6 +222,10 @@ try {
   for (const s of SHOTS.filter((x) => !only || only.includes(x.file))) {
     const page = await session();
     await page.send('Page.enable');
+    // No first-run tour in screenshots.
+    await page.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `try { localStorage.setItem('retrofit.tour.done', '1') } catch {}`,
+    });
     await page.send('Emulation.setDeviceMetricsOverride', {
       width: s.w,
       height: s.h,
@@ -211,6 +269,16 @@ try {
           const el = [...document.querySelectorAll('button, label, a')].find((e) => e.innerText.trim().startsWith(${JSON.stringify(text)}));
           el?.click();
         })()`,
+      });
+      await sleep(1500);
+    }
+    for (const expression of [s.script, s.script2].filter(Boolean)) {
+      await page.send('Runtime.evaluate', { expression });
+      await sleep(1200);
+    }
+    for (const text of s.after ?? []) {
+      await page.send('Runtime.evaluate', {
+        expression: `[...document.querySelectorAll('button')].find((e) => e.innerText.trim().startsWith(${JSON.stringify(text)}))?.click()`,
       });
       await sleep(1500);
     }

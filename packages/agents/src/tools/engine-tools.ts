@@ -182,6 +182,7 @@ export function engineTools(
 - offer_payment_plan: payload {installments: 2-12, intervalDays?: 7-92, firstDue?: YYYY-MM-DD}. Uses PayPal partial payments on the same invoice; use it when a customer asked to pay in parts.
 - apply_late_fee: payload {amount}. Adds the owner's late fee to the PayPal invoice; usually proposed by run_collections under the owner's terms.
 - send_statement: target entity "customer", number = the customer key from customer_accounts. Emails the customer their statement with pay links and their portal link.
+- charge_autopay: no payload. Charges the saved PayPal of a customer on autopay for that invoice; usually proposed by run_collections on the due date.
 Results include "status": "executed", "pending" (needs approval), "scheduled" (held for quiet hours; see runAfter) or "rejected", plus "policyReason" explaining which rule applied.
 Call it once per target. Always tell the user what you proposed and whether it ran or is waiting for approval.`,
     inputSchema: z.object({

@@ -40,6 +40,8 @@ export interface RequestOptions {
   idempotencyKey?: string;
   query?: Record<string, string | number | undefined>;
   representation?: boolean;
+  /** Accept header; JSON unless the endpoint answers with something else. */
+  accept?: string;
 }
 
 export interface Money {
@@ -134,7 +136,7 @@ export class PayPalClient {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${await this.accessToken()}`,
       'Content-Type': 'application/json',
-      Accept: 'application/json',
+      Accept: o.accept ?? 'application/json',
     };
     if (o.idempotencyKey) headers['PayPal-Request-Id'] = o.idempotencyKey.slice(0, 108);
     if (o.representation) headers.Prefer = 'return=representation';
@@ -202,6 +204,20 @@ export class PayPalClient {
       { idempotencyKey },
     );
   }
+  /** PayPal's QR code for a sent invoice, as PNG bytes: scanning it opens the invoice's pay page. */
+  async invoiceQrCode(id: string, opts: { size?: number; action?: 'pay' | 'details' } = {}): Promise<Buffer> {
+    const size = Math.max(150, Math.min(500, Math.round(opts.size ?? 300)));
+    const body = await this.request<unknown>(
+      'POST',
+      `/v2/invoicing/invoices/${encodeURIComponent(id)}/generate-qr-code`,
+      { width: size, height: size, action: opts.action ?? 'pay' },
+      { accept: '*/*' },
+    );
+    const png = pngFromQrResponse(body);
+    if (!png) throw new Error('PayPal answered the QR code request in an unexpected format');
+    return png;
+  }
+
   searchInvoices(criteria: Record<string, unknown>, page = 1, pageSize = 100) {
     return this.request<{ items?: PayPalInvoice[]; total_items?: number }>(
       'POST',
@@ -272,6 +288,25 @@ export class PayPalClient {
     return this.request<void>('POST', `/v1/billing/subscriptions/${encodeURIComponent(id)}/cancel`, {
       reason,
     });
+  }
+
+  // ---- Vault v3 (autopay: a customer saves PayPal with the business)
+  createSetupToken(body: unknown, idempotencyKey: string) {
+    return this.request<any>('POST', '/v3/vault/setup-tokens', body, { idempotencyKey });
+  }
+  getSetupToken(id: string) {
+    return this.request<any>('GET', `/v3/vault/setup-tokens/${encodeURIComponent(id)}`);
+  }
+  createPaymentToken(setupTokenId: string, idempotencyKey: string) {
+    return this.request<any>(
+      'POST',
+      '/v3/vault/payment-tokens',
+      { payment_source: { token: { id: setupTokenId, type: 'SETUP_TOKEN' } } },
+      { idempotencyKey },
+    );
+  }
+  deletePaymentToken(id: string) {
+    return this.request<void>('DELETE', `/v3/vault/payment-tokens/${encodeURIComponent(id)}`);
   }
 
   // ---- Webhooks ----
@@ -348,6 +383,25 @@ export class PayPalClient {
   }
 }
 
+/**
+ * The QR endpoint returns the PNG base64-encoded: as the whole body, inside a multipart body, or in a JSON
+ * field. Take the first base64 run that decodes to a PNG.
+ */
+export function pngFromQrResponse(body: unknown): Buffer | null {
+  const texts =
+    typeof body === 'string'
+      ? [body]
+      : body && typeof body === 'object'
+        ? Object.values(body).filter((v): v is string => typeof v === 'string')
+        : [];
+  for (const t of texts)
+    for (const m of t.matchAll(/[A-Za-z0-9+/=\r\n]{64,}/g)) {
+      const buf = Buffer.from(m[0].replace(/\s+/g, ''), 'base64');
+      if (buf.length > 8 && buf[0] === 0x89 && buf.subarray(1, 4).toString() === 'PNG') return buf;
+    }
+  return null;
+}
+
 function safeJson(t: string): unknown {
   try {
     return JSON.parse(t);
@@ -402,4 +456,6 @@ export const WEBHOOK_EVENTS = [
   'CUSTOMER.DISPUTE.RESOLVED',
   'CHECKOUT.ORDER.APPROVED',
   'CHECKOUT.ORDER.COMPLETED',
+  'VAULT.PAYMENT-TOKEN.CREATED',
+  'VAULT.PAYMENT-TOKEN.DELETED',
 ];

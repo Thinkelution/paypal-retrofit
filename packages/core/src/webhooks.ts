@@ -112,6 +112,23 @@ async function applyEvent(rf: Retrofit, event: any): Promise<string | null> {
     return res?.summary ?? null;
   }
 
+  if (type.startsWith('VAULT.PAYMENT-TOKEN.')) {
+    // The customer removed the business from their PayPal automatic payments: autopay stops.
+    const a = r.id ? rf.state.getAutopayByToken(String(r.id)) : null;
+    if (!a) return null;
+    if (type === 'VAULT.PAYMENT-TOKEN.DELETED' && a.status === 'active') {
+      rf.state.saveAutopay({
+        customerPk: a.customerPk,
+        status: 'off',
+        paymentTokenId: null,
+        lastError: 'Removed in PayPal by the customer',
+      });
+      rf.emit('autopay', { customerPk: a.customerPk });
+      return `Autopay off for customer ${a.customerPk}: removed in PayPal`;
+    }
+    return `Autopay for customer ${a.customerPk}: ${type}`;
+  }
+
   if (type.startsWith('PAYMENT.CAPTURE.')) {
     const orderId = r.supplementary_data?.related_ids?.order_id;
     if (orderId && rf.state.getOrder(String(orderId))) {

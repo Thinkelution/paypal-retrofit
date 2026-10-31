@@ -23,6 +23,12 @@ export interface DemoOptions {
 
 const TZ = () => process.env.RETROFIT_TIMEZONE ?? 'America/Los_Angeles';
 
+/** In GitHub Codespaces the console is reached through the forwarded port's URL, not localhost. */
+function codespacesUrl(port: number) {
+  const { CODESPACE_NAME: name, GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN: domain } = process.env;
+  return name && domain ? `https://${name}-${port}.${domain}` : undefined;
+}
+
 /**
  * Writes a workspace's config and mapping for a demo business. The mapping comes from the Mapper agent
  * (Claude when configured, otherwise the rule-based mapper), then `extra` adds demo settings.
@@ -58,6 +64,7 @@ export async function demo(opts: DemoOptions & { sandbox?: boolean }) {
     opts.publicUrl ??
     process.env.RETROFIT_PUBLIC_URL ??
     process.env.RENDER_EXTERNAL_URL ??
+    codespacesUrl(port) ??
     `http://localhost:${port}`
   ).replace(/\/$/, '');
   const internal = `http://127.0.0.1:${port}`;
@@ -192,7 +199,7 @@ export async function demo(opts: DemoOptions & { sandbox?: boolean }) {
           const rf = host.workspaces.get('fernhill')!.rf;
           seedInto(fernDb);
           rf.state.db.exec(
-            'DELETE FROM links; DELETE FROM events; DELETE FROM actions; DELETE FROM discrepancies; DELETE FROM meta; DELETE FROM plans; DELETE FROM payments; DELETE FROM digests; DELETE FROM adjustments; DELETE FROM requests; DELETE FROM orders; DELETE FROM outbox;',
+            'DELETE FROM links; DELETE FROM events; DELETE FROM actions; DELETE FROM discrepancies; DELETE FROM meta; DELETE FROM plans; DELETE FROM payments; DELETE FROM digests; DELETE FROM adjustments; DELETE FROM requests; DELETE FROM orders; DELETE FROM outbox; DELETE FROM autopay;',
           );
           await ensureWebhook(rf, { path: '' });
           await host.remove('brightside');

@@ -1,6 +1,8 @@
 import type { SchemaDescription, TableInfo } from '../types.ts';
 import { RetrofitMapping } from './schema.ts';
 
+const SPREADSHEETS = ['csv', 'excel', 'gsheet'];
+
 export interface MappingIssue {
   path: string;
   level: 'error' | 'warning';
@@ -69,9 +71,11 @@ export function validateMapping(
     const required = ['number', 'customer', 'status', 'total'].includes(k);
     if (!column(`invoice.fields.${k}`, it, v, required)) delete (e.invoice.fields as any)[k];
   }
-  for (const [k, v] of Object.entries(e.invoice.writeBack)) {
-    if (!column(`invoice.writeBack.${k}`, it, v, false)) delete (e.invoice.writeBack as any)[k];
-  }
+  // Spreadsheet sources get missing write-back columns added (in retrofit's copy, never the owner's file).
+  if (!SPREADSHEETS.includes(schema.source))
+    for (const [k, v] of Object.entries(e.invoice.writeBack)) {
+      if (!column(`invoice.writeBack.${k}`, it, v, false)) delete (e.invoice.writeBack as any)[k];
+    }
   if (it) {
     const fk = it.foreignKeys.find((f) => f.column === e.invoice.fields.customer);
     if (fk && fk.refTable !== e.customer.table) {

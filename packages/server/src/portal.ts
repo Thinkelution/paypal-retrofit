@@ -1,7 +1,11 @@
 import {
   actionLinkSecret,
   buildStatement,
+  confirmAutopay,
   createCheckout,
+  startAutopay,
+  stopAutopay,
+  submitCustomerRequest,
   finalizeCheckout,
   formatMoney,
   loadCatalog,
@@ -12,13 +16,14 @@ import {
   type Statement,
 } from '@paypal-retrofit/core';
 import express, { type Request, type Response } from 'express';
+import QRCode from 'qrcode';
 
 /**
  * Public, customer-facing pages: the customer portal (one signed link per customer) and the shop.
  * Both are plain server-rendered HTML so they work in any mail client's browser and need no login.
  */
 
-const esc = (s: unknown) =>
+export const esc = (s: unknown) =>
   String(s ?? '').replace(
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
@@ -44,7 +49,7 @@ button,.btn{font:inherit;font-weight:600;padding:9px 16px;border-radius:8px;bord
 .prod b{font-size:16px}.prod .price{font-size:18px;font-weight:700}a{color:var(--accent)}footer{text-align:center;font-size:12px;color:var(--muted)}
 @media (max-width:560px){.kpis{grid-template-columns:minmax(0,1fr)}}`;
 
-const page = (title: string, body: string) =>
+export const page = (title: string, body: string) =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(title)}</title><style>${CSS}</style></head><body><main>${body}<footer>Payments are processed by PayPal. Powered by paypal-retrofit.</footer></main></body></html>`;
 
 export interface PublicContext {
@@ -58,6 +63,12 @@ const FLASH: Record<string, [string, string]> = {
   question: ['ok', 'Thank you. Your question is with us; we will reply by email.'],
   paid: ['ok', 'Payment received. Thank you!'],
   cancelled: ['', 'Payment cancelled. Nothing was charged.'],
+  'autopay-on': [
+    'ok',
+    'Autopay is on. Your saved PayPal is charged when each invoice is due, and PayPal emails you a receipt.',
+  ],
+  'autopay-off': ['', 'Autopay is off. Nothing will be charged automatically.'],
+  'autopay-cancelled': ['', 'Autopay was not set up. Nothing changed.'],
 };
 
 function portalHtml(rf: Retrofit, s: Statement, token: string, flash?: string, error?: string) {
@@ -71,6 +82,9 @@ function portalHtml(rf: Retrofit, s: Statement, token: string, flash?: string, e
       : '';
   const payable = s.lines.filter((l) => l.inPayPal);
   const today = s.asOf;
+  const auto = rf.state.getAutopay(s.customer.pk);
+  const autoOn = auto?.status === 'active';
+  const covered = (balance: number) => autoOn && (auto!.maxAmount == null || balance <= auto!.maxAmount);
   const rows = s.lines
     .map((l) => {
       const reqs = pending(l.legacyPk);
@@ -79,6 +93,7 @@ function portalHtml(rf: Retrofit, s: Statement, token: string, flash?: string, e
           ? `<span class="tag bad">${l.daysOverdue} days overdue</span>`
           : '<span class="tag">not due yet</span>',
         l.onPlan ? '<span class="tag">payment plan</span>' : '',
+        covered(l.balance) && !l.daysOverdue ? '<span class="tag">autopay on the due date</span>' : '',
         ...reqs.map(
           (r) =>
             `<span class="tag">${r.kind === 'promise' ? `you said you'd pay by ${esc(r.until)}` : r.kind === 'plan' ? 'plan requested' : 'question sent'}</span>`,
@@ -109,10 +124,15 @@ function portalHtml(rf: Retrofit, s: Statement, token: string, flash?: string, e
 <div class="kpis"><div class="kpi"><span class="muted small">Open balance</span><b>${esc(m(s.totals.balance))}</b></div><div class="kpi"><span class="muted small">Overdue</span><b class="${s.totals.overdue ? 'bad' : ''}">${esc(m(s.totals.overdue))}</b></div><div class="kpi"><span class="muted small">Invoices</span><b>${s.lines.length}</b></div></div></section>
 <section class="card"><h2>Open invoices</h2>${rows || '<p class="ok">Nothing is open. Thank you!</p>'}
 ${payable.length ? `<form id="payform" method="post" action="pay" class="row" style="margin-top:14px"><span class="muted">Selected: <b id="sel">${esc(m(payable.reduce((t, l) => t + l.balance, 0)))}</b></span><span class="spacer"></span><a class="btn" href="statement">Statement</a><button class="primary">Pay selected with PayPal</button></form>` : `<div class="row" style="margin-top:14px"><span class="spacer"></span><a class="btn" href="statement">Statement</a></div>`}</section>
+<section class="card"><h2>Autopay</h2>${
+      autoOn
+        ? `<p>On with PayPal${auto!.payerEmail ? ` (${esc(auto!.payerEmail)})` : ''}${auto!.maxAmount != null ? ` for invoices up to ${esc(m(auto!.maxAmount))}` : ''}. Invoices are paid on their due date and PayPal emails you a receipt.</p>${auto!.lastError ? `<div class="banner bad">The last automatic payment did not go through: ${esc(auto!.lastError)}. Please pay it above.</div>` : ''}<form method="post" action="autopay/off" class="row"><button>Turn off autopay</button><span class="muted small">You can also remove ${esc(s.business)} in your PayPal account.</span></form>`
+        : `<p>Pay ${esc(s.business)}'s invoices automatically with PayPal on their due date. No more reminders; you can cap the amount and turn it off at any time.</p>${auto?.status === 'pending' ? '<p class="muted small">You started setting this up. Finish at PayPal, or start again:</p>' : ''}<form method="post" action="autopay" class="row"><label>Up to <input type="number" name="max" min="1" step="1" placeholder="no limit" style="width:120px"> per invoice</label><button class="primary">Set up autopay with PayPal</button></form>`
+    }</section>
 ${payments ? `<section class="card"><h2>Received, thank you</h2>${payments}</section>` : ''}
 <script>(()=>{const f=new Intl.NumberFormat('en-US',{style:'currency',currency:${JSON.stringify(s.currency)}});const boxes=[...document.querySelectorAll('input[name=invoice][type=checkbox]')];const out=document.getElementById('sel');const upd=()=>{if(out)out.textContent=f.format(boxes.filter(b=>b.checked).reduce((t,b)=>t+Number(b.dataset.amount),0))};boxes.forEach(b=>b.addEventListener('change',upd));})();</script>`,
   )
-    .replace(/action="(request|pay)"/g, `action="${esc(token)}/$1"`)
+    .replace(/action="(request|pay|autopay(?:\/off)?)"/g, `action="${esc(token)}/$1"`)
     .replace(/href="statement"/g, `href="${esc(token)}/statement"`);
 }
 
@@ -158,7 +178,49 @@ export function portalRouter(rf: Retrofit, ctx: PublicContext) {
     const v = who(req.params.token!);
     if ('error' in v) return fail(res, v.error);
     const s = await buildStatement(rf, v.customerPk);
-    res.type('html').send(renderStatement(s, { portalUrl: `${ctx.base(req)}/p/${req.params.token}` }).html);
+    const portalUrl = `${ctx.base(req)}/p/${req.params.token}`;
+    // Printed statements carry a QR code that opens the portal on a phone.
+    const portalQr = await QRCode.toDataURL(portalUrl, { width: 224, margin: 1 });
+    res.type('html').send(renderStatement(s, { portalUrl, portalQr }).html);
+  });
+
+  // Autopay: save PayPal with the business (PayPal Vault), then invoices are paid on their due date.
+  r.post('/:token/autopay', async (req, res) => {
+    const v = who(req.params.token!);
+    if ('error' in v) return fail(res, v.error);
+    const self = `${ctx.base(req)}/p/${req.params.token}`;
+    try {
+      const { approveUrl } = await startAutopay(rf, v.customerPk, {
+        returnUrl: `${self}/autopay/return`,
+        cancelUrl: `${self}?done=autopay-cancelled`,
+        maxAmount: Number(req.body?.max) || null,
+      });
+      res.redirect(303, approveUrl);
+    } catch (e) {
+      res.redirect(
+        303,
+        `${req.baseUrl}/${req.params.token}?error=${encodeURIComponent((e as Error).message)}`,
+      );
+    }
+  });
+  r.get('/:token/autopay/return', async (req, res) => {
+    const v = who(req.params.token!);
+    if ('error' in v) return fail(res, v.error);
+    try {
+      await confirmAutopay(rf, v.customerPk, String(req.query.approval_token_id ?? '') || undefined);
+      res.redirect(303, `${req.baseUrl}/${req.params.token}?done=autopay-on`);
+    } catch (e) {
+      res.redirect(
+        303,
+        `${req.baseUrl}/${req.params.token}?error=${encodeURIComponent((e as Error).message)}`,
+      );
+    }
+  });
+  r.post('/:token/autopay/off', async (req, res) => {
+    const v = who(req.params.token!);
+    if ('error' in v) return fail(res, v.error);
+    await stopAutopay(rf, v.customerPk);
+    res.redirect(303, `${req.baseUrl}/${req.params.token}?done=autopay-off`);
   });
 
   r.post('/:token/pay', async (req, res) => {
@@ -187,44 +249,23 @@ export function portalRouter(rf: Retrofit, ctx: PublicContext) {
   r.post('/:token/request', async (req, res) => {
     const v = who(req.params.token!);
     if ('error' in v) return fail(res, v.error);
-    const kind = String(req.body?.kind);
-    const legacyPk = String(req.body?.invoice ?? '');
-    const s = await buildStatement(rf, v.customerPk);
-    const line = s.lines.find((l) => l.legacyPk === legacyPk);
-    if (!line || !['promise', 'plan', 'question'].includes(kind))
-      return res.redirect(
+    try {
+      const r = await submitCustomerRequest(rf, {
+        customerPk: v.customerPk,
+        legacyPk: String(req.body?.invoice ?? ''),
+        kind: String(req.body?.kind),
+        date: req.body?.date,
+        installments: Number(req.body?.installments ?? 2),
+        message: req.body?.message,
+        via: 'in the portal',
+      });
+      res.redirect(303, `${req.baseUrl}/${req.params.token}?done=${r.kind}`);
+    } catch (e) {
+      res.redirect(
         303,
-        `${req.baseUrl}/${req.params.token}?error=${encodeURIComponent('That invoice is not open')}`,
+        `${req.baseUrl}/${req.params.token}?error=${encodeURIComponent((e as Error).message)}`,
       );
-    const date = String(req.body?.date ?? '');
-    if (kind === 'promise' && !/^\d{4}-\d{2}-\d{2}$/.test(date))
-      return res.redirect(
-        303,
-        `${req.baseUrl}/${req.params.token}?error=${encodeURIComponent('Choose a date')}`,
-      );
-    const installments = Math.min(4, Math.max(2, Number(req.body?.installments ?? 2) || 2));
-    rf.state.addRequest({
-      customerPk: v.customerPk,
-      legacyPk,
-      kind: kind as 'promise' | 'plan' | 'question',
-      detail: kind === 'question' ? String(req.body?.message ?? '').slice(0, 1000) : null,
-      until: kind === 'promise' ? date : null,
-      installments: kind === 'plan' ? installments : null,
-    });
-    if (kind === 'plan' && line.inPayPal && !line.onPlan) {
-      // Put it in front of the owner straight away; their policy decides (confirm by default).
-      await rf
-        .propose({
-          origin: 'portal',
-          kind: 'offer_payment_plan',
-          target: { entity: 'invoice', legacyPk, label: line.number },
-          payload: { installments, intervalDays: 14, amount: line.balance },
-          reason: `${s.customer.name} asked in the portal to pay ${line.number} in ${installments} parts`,
-        })
-        .catch((e) => rf.log.warn(`portal plan request: ${(e as Error).message}`));
     }
-    rf.emit('request', { customerPk: v.customerPk, kind });
-    res.redirect(303, `${req.baseUrl}/${req.params.token}?done=${kind}`);
   });
 
   return r;

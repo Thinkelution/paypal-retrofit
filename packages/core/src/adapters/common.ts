@@ -11,6 +11,10 @@ export interface SourceAdapter {
   readTable(table: string, where?: { column: string; in: unknown[] }): Promise<Row[]>;
   /** Update allowed columns of one row. */
   update(table: string, pkColumn: string, pk: unknown, patch: Row): Promise<void>;
+  /** Insert one row and return it as stored. */
+  insert(table: string, pkColumn: string, row: Row): Promise<Row>;
+  /** Pick up changes made outside retrofit (re-read spreadsheets and exports). Databases need nothing. */
+  refresh?(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -28,6 +32,17 @@ export function assertReadOnlySql(sql: string): void {
 export function quoteIdent(name: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`Unsafe identifier: ${name}`);
   return `"${name}"`;
+}
+
+/** A column or table name from a spreadsheet header made safe for SQL: "Due Date" -> Due_Date, "Invoice #" -> Invoice_no. */
+export function safeIdent(name: string, fallback = 'column'): string {
+  const s = String(name ?? '')
+    .trim()
+    .replace(/#/g, ' no ')
+    .replace(/[^A-Za-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  if (!s) return fallback;
+  return /^[0-9]/.test(s) ? `_${s}` : s;
 }
 
 const ENUM_NAME_RE = /(status|state|type|kind|stage|category|interval|frequency|currency)$/i;

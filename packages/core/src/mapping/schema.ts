@@ -98,6 +98,8 @@ export const DEFAULT_POLICIES: Record<(typeof ACTION_KINDS)[number], z.infer<typ
   apply_late_fee: 'confirm',
   expire_discount: 'auto',
   send_statement: 'confirm',
+  // The customer agreed to it; the owner's amount rules and daily limits still apply.
+  charge_autopay: 'auto',
 };
 
 /** A conditional policy: the first rule whose kind and amount range match decides the mode. */

@@ -308,6 +308,7 @@ export interface CustomerRow {
   onTimeRate: number | null;
   portalUrl: string | null;
   lastStatement: string | null;
+  autopay: 'active' | 'pending' | null;
 }
 
 export interface CustomerRequest {
@@ -401,6 +402,106 @@ export interface PracticeRow {
   error?: string;
 }
 
+export interface DraftLine {
+  description: string;
+  qty: number;
+  unitPrice: number;
+}
+
+export interface InvoiceDraft {
+  customer: { key?: string; name: string; email?: string };
+  lines: DraftLine[];
+  due?: string;
+  notes?: string;
+  questions: string[];
+  engine: 'claude' | 'rules' | 'manual';
+  warning?: string;
+}
+
+export interface NewInvoiceContext {
+  business: string;
+  currency: string;
+  today: string;
+  usualTermsDays: number;
+  customers: Array<{ key: string; name: string; email: string }>;
+  products: Array<{ name: string; price: number }>;
+  claude: boolean;
+  source: string;
+}
+
+export interface AddedInvoice {
+  legacyPk: string;
+  number: string;
+  customerKey: string;
+  newCustomer: boolean;
+  total: number;
+  status: string;
+  due: string;
+  actions: Action[];
+  paypal?: { id: string; link?: string; status?: string };
+}
+
+export interface TodayNeed {
+  id: string;
+  tone: 'bad' | 'warn' | 'info';
+  title: string;
+  detail: string;
+  go?: string;
+  run?: 'sync' | 'collections';
+  label: string;
+  items?: Array<{ label: string; sub?: string; amount?: number | null }>;
+}
+
+export interface TodayView {
+  business: string;
+  currency: string;
+  environment: string;
+  money: {
+    owed: number;
+    open: number;
+    overdue: number;
+    overdueCount: number;
+    collected7d: number;
+    collected7dCount: number;
+    expected30: number;
+    atRisk: number;
+  };
+  needs: TodayNeed[];
+  recent: Array<{ at: string; text: string; kind: 'payment' | 'action' | 'customer' | 'order' }>;
+  setup: { stage: string; done: number; total: number; next: string | null };
+  autopay: { active: number };
+}
+
+export interface GoLiveCheck {
+  id: string;
+  title: string;
+  status: 'done' | 'todo' | 'warn' | 'info';
+  detail: string;
+  fix?: { label: string; action?: 'sync' | 'register_webhook' | 'reconcile'; tab?: string; how?: string[] };
+}
+
+export interface GoLive {
+  environment: string;
+  stage: 'simulator' | 'sandbox' | 'live';
+  done: number;
+  total: number;
+  checks: GoLiveCheck[];
+}
+
+export interface AutopayInfo {
+  customers: Array<{
+    customerPk: string;
+    name: string;
+    status: 'pending' | 'active' | 'off';
+    payerEmail: string | null;
+    maxAmount: number | null;
+    lastError: string | null;
+    lastChargeAt: string | null;
+    updatedAt: string;
+  }>;
+  due: Array<{ legacyPk: string; number: string; customer: string; amount: number; due: string }>;
+}
+
 /** Set when this console is one client of several, served under /c/<id> (multi-client mode and the demo). */
 export const BASE = (window.location.pathname.match(/^\/c\/[^/]+/) ?? [''])[0];
 /** Host-level APIs live at the root; everything else belongs to this workspace. */
@@ -491,6 +592,26 @@ export const api = {
   runTerms: () => req<Action[]>('POST', '/api/terms/run'),
   shop: () => req<ShopInfo>('GET', '/api/shop'),
   saveShop: (s: Partial<ShopInfo['settings']>) => req<ShopInfo['settings']>('PUT', '/api/shop', s),
+  invoices: {
+    context: () => req<NewInvoiceContext>('GET', '/api/invoices/new'),
+    draft: (body: { text?: string; image?: { data: string; mediaType: string } }) =>
+      req<InvoiceDraft>('POST', '/api/invoices/draft', body),
+    add: (body: {
+      customer: { key?: string; name: string; email?: string };
+      lines: DraftLine[];
+      due?: string;
+      notes?: string;
+      send?: boolean;
+    }) => req<AddedInvoice>('POST', '/api/invoices', body),
+  },
+  today: () => req<TodayView>('GET', '/api/today'),
+  golive: () => req<GoLive>('GET', '/api/golive'),
+  registerWebhook: () => req<{ id: string; url: string; events: number }>('POST', '/api/golive/webhook'),
+  autopay: () => req<AutopayInfo>('GET', '/api/autopay'),
+  runAutopay: () => req<Action[]>('POST', '/api/autopay/run'),
+  autopayOff: (pk: string) => req('POST', `/api/autopay/${encodeURIComponent(pk)}/off`),
+  slipUrl: (pk: string) => u(`/api/invoices/${encodeURIComponent(pk)}/slip`),
+  qrUrl: (pk: string) => u(`/api/invoices/${encodeURIComponent(pk)}/qr.png`),
   host: () => req<HostInfo>('GET', '/api/host'),
   practice: () => req<PracticeRow[]>('GET', '/api/practice'),
   setup: {
@@ -580,6 +701,7 @@ export const KIND_LABEL: Record<string, string> = {
   apply_late_fee: 'Add late fee',
   expire_discount: 'End early-payment discount',
   send_statement: 'Send statement',
+  charge_autopay: 'Charge autopay',
 };
 
 export const DISCREPANCY_LABEL: Record<string, string> = {

@@ -23,10 +23,19 @@ export async function listen(app: express.Express) {
   return { url, close: () => new Promise((r) => server.close(r)) };
 }
 
-/** Fernhill DB + mock PayPal + a webhook receiver wired to a Retrofit engine. */
-export async function harness(opts: { autoApprove?: boolean; quietHours?: boolean } = {}) {
+/** Fernhill DB (or another source) + mock PayPal + a webhook receiver wired to a Retrofit engine. */
+export async function harness(
+  opts: {
+    autoApprove?: boolean;
+    quietHours?: boolean;
+    /** Another source instead of Fernhill, made in the test's own folder. */
+    source?: (dir: string) => string | Promise<string>;
+    business?: string;
+  } = {},
+) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'retrofit-test-'));
   const dbFile = seed({ file: path.join(dir, 'fernhill.db'), today: new Date('2026-10-29T12:00:00Z') });
+  const conn = opts.source ? await opts.source(dir) : `sqlite:${dbFile}`;
 
   // Mock PayPal on an ephemeral port (public URL patched after listen).
   const holder: { url: string } = { url: '' };
@@ -42,7 +51,7 @@ export async function harness(opts: { autoApprove?: boolean; quietHours?: boolea
   process.env.RETROFIT_QUIET = '1';
   delete process.env.PAYPAL_WEBHOOK_ID;
 
-  const source = openSource(`sqlite:${dbFile}`);
+  const source = openSource(conn, dir);
   const schema = await source.introspect();
   const proposal = heuristicMapping(schema)!;
   const { mapping, issues } = validateMapping(proposal, schema);
@@ -50,10 +59,10 @@ export async function harness(opts: { autoApprove?: boolean; quietHours?: boolea
   if (!opts.quietHours) mapping.quietHours = undefined;
 
   const config: ResolvedConfig = {
-    source: `sqlite:${dbFile}`,
+    source: conn,
     mapping: path.join(dir, 'retrofit.map.json'),
     state: path.join(dir, 'state.db'),
-    business: { name: 'Fernhill Studio' },
+    business: { name: opts.business ?? 'Fernhill Studio' },
     paypal: { invoicePrefix: '' },
     webhook: {},
     sync: { intervalSeconds: 60 },
@@ -82,6 +91,7 @@ export async function harness(opts: { autoApprove?: boolean; quietHours?: boolea
     mapping,
     issues,
     dbFile,
+    dir,
     async close() {
       await rf.close();
       await mockServer.close();

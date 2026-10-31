@@ -93,6 +93,10 @@ export const KIND_LABEL: Record<string, string> = {
   cancel_subscription: 'Cancel subscription',
   accept_dispute: 'Accept dispute',
   offer_payment_plan: 'Offer payment plan',
+  apply_late_fee: 'Add late fee',
+  expire_discount: 'End early-payment discount',
+  send_statement: 'Send statement',
+  charge_autopay: 'Charge autopay',
 };
 
 export function businessTimezone(rf: Retrofit): string {

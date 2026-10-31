@@ -20,3 +20,19 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+
+  # Builds the one-container demo and checks it starts and serves the console.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t paypal-retrofit .
+      - name: Start the demo container and check it answers
+        run: |
+          docker run -d --name retrofit -p 8787:8787 paypal-retrofit
+          for i in $(seq 1 60); do curl -fs http://localhost:8787/healthz && break; sleep 2; done
+          curl -fs http://localhost:8787/api/summary
+          curl -fs http://localhost:8787/ | grep -q '<div id="root">'
+          curl -fs http://localhost:8787/shop | grep -qi 'fernhill'
+      - if: always()
+        run: docker logs retrofit | tail -40

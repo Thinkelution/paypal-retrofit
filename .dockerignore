@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+.git
+.github
+.claude
+.devcontainer
+.retrofit
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.log
+site
+video

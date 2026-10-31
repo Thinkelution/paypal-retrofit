@@ -13,3 +13,4 @@ coverage/
 .DS_Store
 *.retrofit.csv
 .claude/
+video/out/

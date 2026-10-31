@@ -11,12 +11,16 @@
     "better-sqlite3": "^11.5.0",
     "csv-parse": "^5.5.6",
     "csv-stringify": "^6.5.1",
+    "exceljs": "^4.4.0",
+    "mysql2": "^3.24.6",
     "pg": "^8.13.1",
+    "qrcode": "^1.5.4",
     "yaml": "^2.6.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@paypal-retrofit/mock-paypal": "workspace:*",
+    "@types/qrcode": "^1.5.6",
     "express": "^4.21.1",
     "fernhill-legacy-invoicer": "workspace:*"
   }

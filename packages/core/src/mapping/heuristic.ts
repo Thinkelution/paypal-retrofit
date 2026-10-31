@@ -44,9 +44,14 @@ export function heuristicMapping(
     ['retainer', 'subscription', 'membership', 'plan', 'recurring', 'monthly'],
     [customers?.name, lines?.name, invoices?.name, products?.name].filter(Boolean) as string[],
   );
-  if (!customers || !invoices) return null;
+  // One sheet with everything, as many spreadsheets are: each invoice row names its customer, keyed by email.
+  const inlineEmail = !customers && invoices ? col(invoices, [/e_?mail/i]) : undefined;
+  const cust = customers ?? (inlineEmail ? invoices : undefined);
+  if (!cust || !invoices) return null;
 
   const statusCol = col(invoices, [/^status$/i, /state$/i]) ?? 'status';
+  // Spreadsheets can take new columns (in retrofit's copy), so PayPal ids and payments always have a place.
+  const add = (name: string) => (['csv', 'excel', 'gsheet'].includes(schema.source) ? name : undefined);
   const statuses = invoices.enums[statusCol] ?? [];
   const isPaid = (s: string) => /^(paid|settled|complete|completed|closed)$/i.test(s);
   const isCancelled = (s: string) => /^(void|cancel+ed|written_off|deleted)$/i.test(s);
@@ -63,17 +68,24 @@ export function heuristicMapping(
     currency,
     entities: {
       customer: {
-        table: customers.name,
-        pk: pk(customers),
+        table: cust.name,
+        pk: inlineEmail ?? pk(cust),
         fields: {
-          name: col(customers, [/^full_?name$/i, /^name$/i, /display_?name/i, /company/i]) ?? 'name',
-          email: col(customers, [/email/i]) ?? 'email',
-          phone: col(customers, [/phone|mobile|tel/i]),
-          line1: col(customers, [/addr(ess)?_?1|line_?1|street|^address$/i]),
-          city: col(customers, [/city|town/i]),
-          state: col(customers, [/^state$|province|region/i]),
-          postal: col(customers, [/zip|postal|postcode/i]),
-          country: col(customers, [/country/i]),
+          name:
+            col(cust, [
+              /^full_?name$/i,
+              /^name$/i,
+              /display_?name/i,
+              /company/i,
+              ...(inlineEmail ? [/customer|client/i] : []),
+            ]) ?? 'name',
+          email: col(cust, [/email/i]) ?? 'email',
+          phone: col(cust, [/phone|mobile|tel/i]),
+          line1: col(cust, [/addr(ess)?_?1|line_?1|street|^address$/i]),
+          city: col(cust, [/city|town/i]),
+          state: col(cust, [/^state$|province|region/i]),
+          postal: col(cust, [/zip|postal|postcode/i]),
+          country: col(cust, [/country/i]),
         },
       },
       product: products
@@ -93,13 +105,14 @@ export function heuristicMapping(
         fields: {
           number: col(invoices, [/invoice_?(no|num|number)/i, /^number$/i, /^ref/i]) ?? pk(invoices),
           customer:
-            invoices.foreignKeys.find((f) => f.refTable === customers.name)?.column ??
+            inlineEmail ??
+            invoices.foreignKeys.find((f) => f.refTable === cust.name)?.column ??
             col(invoices, [/customer|client/i]) ??
             'customer_id',
-          issued: col(invoices, [/issue|invoice_?date|created/i]),
+          issued: col(invoices, [/issue|invoice_?date|created|^date$/i]),
           due: col(invoices, [/due/i]),
           status: statusCol,
-          total: col(invoices, [/^total$/i, /amount_?due/i, /^amount$/i, /total/i]) ?? 'total',
+          total: col(invoices, [/^total$/i, /amount_?due/i, /^amount$/i, /total/i, /amount/i]) ?? 'total',
           notes: col(invoices, [/note|memo/i]),
         },
         lines:
@@ -120,11 +133,11 @@ export function heuristicMapping(
         statusMap: { open, paid: statuses.filter(isPaid), cancelled: statuses.filter(isCancelled) },
         push: push.length ? push : open,
         writeBack: {
-          paypalId: col(invoices, [/paypal_?invoice_?id/i, /paypal_?id/i]),
-          payLink: col(invoices, [/paypal_?(link|url)/i, /pay_?(link|url)/i]),
+          paypalId: col(invoices, [/paypal_?invoice_?id/i, /paypal_?id/i]) ?? add('PayPal_invoice'),
+          payLink: col(invoices, [/paypal_?(link|url)/i, /pay_?(link|url)/i]) ?? add('Pay_link'),
           status: statusCol,
-          paidAt: col(invoices, [/paid_?(at|on|date)/i]),
-          paidAmount: col(invoices, [/paid_?amount|amount_?paid/i]),
+          paidAt: col(invoices, [/paid_?(at|on|date)/i]) ?? add('Paid_on'),
+          paidAmount: col(invoices, [/paid_?amount|amount_?paid/i]) ?? add('Paid_amount'),
         },
       },
       subscription: undefined,
@@ -135,8 +148,10 @@ export function heuristicMapping(
     terms: {},
     commerce: Commerce.parse({}),
     rationale: {
-      'customer.table': `"${customers.name}" has the strongest customer/contact signals`,
-      'invoice.table': `"${invoices.name}" has invoice-like columns and references "${customers.name}"`,
+      'customer.table': inlineEmail
+        ? `"${invoices.name}" names the customer on each invoice row; customers are told apart by "${inlineEmail}"`
+        : `"${cust.name}" has the strongest customer/contact signals`,
+      'invoice.table': `"${invoices.name}" has invoice-like columns and references "${cust.name}"`,
     },
     confidence: { customer: 0.6, invoice: 0.6 },
     generatedBy: 'heuristic',
@@ -150,7 +165,7 @@ export function heuristicMapping(
       pk: pk(subs),
       fields: {
         customer:
-          subs.foreignKeys.find((f) => f.refTable === customers.name)?.column ??
+          subs.foreignKeys.find((f) => f.refTable === cust.name)?.column ??
           col(subs, [/customer|client/i]) ??
           'customer_id',
         amount: col(subs, [/fee|amount|price|rate/i]) ?? 'amount',

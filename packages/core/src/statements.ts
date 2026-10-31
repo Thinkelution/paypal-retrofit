@@ -18,6 +18,8 @@ export interface CustomerSummary {
   openRequests: number;
   behaviour: string | null;
   onTimeRate: number | null;
+  /** Autopay with a saved PayPal: on, being set up, or none. */
+  autopay: 'active' | 'pending' | null;
 }
 
 export interface StatementLine {
@@ -97,6 +99,7 @@ export async function listCustomers(rf: Retrofit, today = todayIso()): Promise<C
           openRequests: requests.filter((r) => r.customerPk === inv.customerPk).length,
           behaviour: profiles.get(inv.customerPk)?.behaviour ?? null,
           onTimeRate: profiles.get(inv.customerPk)?.onTimeRate ?? null,
+          autopay: autopayStatus(rf, inv.customerPk),
         })
         .get(inv.customerPk)!;
     const line = lineFor(rf, inv, today);
@@ -113,6 +116,11 @@ export async function listCustomers(rf: Retrofit, today = todayIso()): Promise<C
       c.lastPaymentAt = p.occurredAt;
   }
   return [...out.values()].sort((a, b) => b.overdue - a.overdue || b.balance - a.balance);
+}
+
+function autopayStatus(rf: Retrofit, customerPk: string): CustomerSummary['autopay'] {
+  const s = rf.state.getAutopay(customerPk)?.status;
+  return s === 'active' || s === 'pending' ? s : null;
 }
 
 export async function buildStatement(
@@ -181,7 +189,7 @@ export function formatMoney(n: number, currency: string) {
 }
 
 /** Statement email: every open invoice with its pay link, recent payments, aging, and the portal link. */
-export function renderStatement(s: Statement, opts: { portalUrl?: string } = {}) {
+export function renderStatement(s: Statement, opts: { portalUrl?: string; portalQr?: string } = {}) {
   const m = (n: number) => formatMoney(n, s.currency);
   const subject = `Statement from ${s.business}: ${m(s.totals.balance)} open${s.totals.overdue ? `, ${m(s.totals.overdue)} overdue` : ''}`;
   const t: string[] = [`Statement for ${s.customer.name} · ${s.business} · as of ${s.asOf}`, ''];
@@ -232,7 +240,7 @@ export function renderStatement(s: Statement, opts: { portalUrl?: string } = {})
 <tr><td style="padding:10px 26px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="4"><tr>${aging}</tr></table></td></tr>
 <tr><td style="padding:16px 26px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows || `<tr><td ${cell}>Nothing is open. Thank you.</td></tr>`}</table></td></tr>
 ${pays ? `<tr><td style="padding:18px 26px 0"><div style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${muted};font-weight:600">Received in the last 90 days, thank you</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${pays}</table></td></tr>` : ''}
-<tr><td style="padding:22px 26px 26px">${opts.portalUrl ? `<a href="${esc(opts.portalUrl)}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:${accent};color:#fff;font-weight:600;text-decoration:none">See and pay everything in one place</a>` : ''}<div style="font-size:12px;color:${muted};margin-top:16px">Payments are handled by PayPal. Questions about a charge? Reply to this email${opts.portalUrl ? ' or use the portal' : ''}.</div></td></tr>
+<tr><td style="padding:22px 26px 26px">${opts.portalQr ? `<img src="${esc(opts.portalQr)}" width="112" height="112" alt="QR code: scan to see and pay these invoices" style="float:right;margin:0 0 8px 12px"><div style="font-size:12px;color:${muted};margin-bottom:8px">On paper? Scan the code with a phone to pay.</div>` : ''}${opts.portalUrl ? `<a href="${esc(opts.portalUrl)}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:${accent};color:#fff;font-weight:600;text-decoration:none">See and pay everything in one place</a>` : ''}<div style="font-size:12px;color:${muted};margin-top:16px">Payments are handled by PayPal. Questions about a charge? Reply to this email${opts.portalUrl ? ' or use the portal' : ''}.</div></td></tr>
 </table></td></tr></table></body></html>`;
   return { subject, html, text: t.join('\n') };
 }

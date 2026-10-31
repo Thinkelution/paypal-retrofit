@@ -26,6 +26,7 @@ const LABEL: Record<ActionKind, string> = {
   apply_late_fee: 'late fees',
   expire_discount: 'ending early-payment discounts',
   send_statement: 'customer statements',
+  charge_autopay: 'autopay charges',
 };
 
 /**

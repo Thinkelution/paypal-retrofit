@@ -2,6 +2,7 @@ import {
   AgentUnavailableError,
   claudeConfigured,
   draftDisputeResponse,
+  draftInvoice,
   draftReminders,
   OpsAgent,
   type OpsEvent,
@@ -45,6 +46,14 @@ import {
   signPortalToken,
   Commerce,
   PaymentTerms,
+  addInvoice,
+  intakeContext,
+  planAutopay,
+  runAutopay,
+  stopAutopay,
+  goLiveChecks,
+  todayView,
+  WEBHOOK_EVENTS,
 } from '@paypal-retrofit/core';
 import nodemailer from 'nodemailer';
 import express, { type NextFunction, type Request, type Response } from 'express';
@@ -54,6 +63,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { approvalPage, type ApprovalPageInput } from './approval-page.ts';
 import { portalRouter, shopRouter } from './portal.ts';
+import { demoSitePage, qrRoutes, widgetRouter } from './widget.ts';
 import { digestChannels, digestSchedule, prepareDigest, runScheduledDigest, sendDigest } from './digest.ts';
 
 export * from './digest.ts';
@@ -195,6 +205,12 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
   const publicCtx = { base: (req: Request) => baseFor(req) };
   app.use('/p', portalRouter(rf, publicCtx));
   app.use(shopRouter(rf, publicCtx));
+  // The business's own website: one script tag adds "Pay a bill", Pay buttons and the shop.
+  app.use(widgetRouter(rf, publicCtx));
+  if (opts.demo && !opts.demo.custom)
+    app.get('/site', (_req, res) =>
+      res.type('html').send(demoSitePage(rf.config.business.name, opts.demo?.legacyAppPath)),
+    );
   app.post('/mcp/shop', express.json({ limit: '256kb' }), (req, res, next) => {
     void shopMcpHttpHandler(
       () => rf,
@@ -208,11 +224,58 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
   for (const m of opts.mounts ?? []) if (!m.public) app.use(m.path, m.router);
 
   const api = express.Router();
-  api.use(express.json({ limit: '1mb' }));
   const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response) =>
     fn(req, res).catch((e) =>
       res.status(e instanceof AgentUnavailableError ? 503 : 500).json({ error: (e as Error).message }),
     );
+
+  // ---- new invoices: a sentence, a photo of a paper job sheet, or a form -> the business's system -> PayPal
+  api.get(
+    '/invoices/new',
+    wrap(async (_req, res) => {
+      const ctx = await intakeContext(rf);
+      res.json({ ...ctx, claude: claudeConfigured(), source: rf.source.kind });
+    }),
+  );
+  // Before the 1 MB body limit below: photos are bigger.
+  api.post(
+    '/invoices/draft',
+    express.json({ limit: '8mb' }),
+    wrap(async (req, res) => {
+      const b = req.body ?? {};
+      const image =
+        typeof b.image?.data === 'string'
+          ? {
+              data: String(b.image.data).replace(/^data:[^,]+,/, ''),
+              mediaType: /^image\/(jpeg|png|webp|gif)$/.test(b.image.mediaType)
+                ? b.image.mediaType
+                : 'image/jpeg',
+            }
+          : undefined;
+      try {
+        res.json(
+          await draftInvoice(
+            { text: typeof b.text === 'string' ? b.text : undefined, image },
+            await intakeContext(rf),
+          ),
+        );
+      } catch (e) {
+        res.status(422).json({ error: (e as Error).message });
+      }
+    }),
+  );
+  api.use(express.json({ limit: '1mb' }));
+  api.use(qrRoutes(rf));
+  api.post(
+    '/invoices',
+    wrap(async (req, res) => {
+      try {
+        res.json(await addInvoice(rf, req.body ?? {}));
+      } catch (e) {
+        res.status(422).json({ error: (e as Error).message });
+      }
+    }),
+  );
 
   api.get('/config', (_req, res) =>
     res.json({
@@ -532,6 +595,55 @@ export function createServer(rf: Retrofit, opts: ServerOptions = {}) {
       rf.emit('mapping', {});
       res.json(rf.mapping.terms);
     }),
+  );
+  // ---- the owner's home screen
+  api.get(
+    '/today',
+    wrap(async (_req, res) => res.json(await todayView(rf, { claude: claudeConfigured() }))),
+  );
+
+  // ---- go-live checklist
+  api.get(
+    '/golive',
+    wrap(async (_req, res) => res.json(await goLiveChecks(rf, { claude: claudeConfigured() }))),
+  );
+  api.post(
+    '/golive/webhook',
+    wrap(async (req, res) => {
+      const url = `${publicBaseUrl(rf.config) ?? baseFor(req)}/webhooks/paypal`;
+      if (rf.config.env.paypalEnvironment !== 'MOCK' && !/^https:/.test(url))
+        return res.status(422).json({
+          error: `PayPal needs a public HTTPS address; this console is at ${url}. Set RETROFIT_PUBLIC_URL.`,
+        });
+      const existing = (await rf.paypal.listWebhooks()).webhooks?.find((w: any) => w.url === url);
+      const wh = existing ?? (await rf.paypal.createWebhook(url, WEBHOOK_EVENTS));
+      rf.state.setMeta('paypal.webhookId', wh.id);
+      res.json({ id: wh.id, url, events: WEBHOOK_EVENTS.length });
+    }),
+  );
+
+  // ---- autopay: customers' saved PayPal
+  api.get(
+    '/autopay',
+    wrap(async (_req, res) => {
+      const names = new Map((await listCustomers(rf)).map((c) => [c.pk, c.name]));
+      res.json({
+        customers: rf.state
+          .listAutopay()
+          .map((a) => ({ ...a, name: names.get(a.customerPk) ?? a.customerPk })),
+        due: await planAutopay(rf),
+      });
+    }),
+  );
+  api.post(
+    '/autopay/run',
+    wrap(async (_req, res) => res.json(await runAutopay(rf, { origin: 'dashboard' }))),
+  );
+  api.post(
+    '/autopay/:pk/off',
+    wrap(async (req, res) =>
+      res.json(await stopAutopay(rf, String(req.params.pk), 'Turned off by the business')),
+    ),
   );
   api.post(
     '/terms/run',

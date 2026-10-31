@@ -282,6 +282,11 @@ export function RecordDrawer(props: {
                 Cancel subscription
               </button>
             )}
+            {row.entity === 'invoice' && row.paypalId && ppOpen && (
+              <a className="btn" href={api.slipUrl(row.legacyPk)} target="_blank" rel="noreferrer">
+                Pay slip with QR ↗
+              </a>
+            )}
             {row.payLink && config.demo?.mockPath && (ppOpen || row.paypalStatus === 'APPROVAL_PENDING') && (
               <a className="btn primary" href={row.payLink} target="_blank" rel="noreferrer">
                 {row.entity === 'subscription' ? 'Approve as customer' : 'Pay as customer'} ↗

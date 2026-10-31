@@ -4,7 +4,7 @@
 
 | Package | Responsibility |
 | --- | --- |
-| `core/adapters` | `SourceAdapter` for SQLite (`better-sqlite3`, separate read-only connection), Postgres (`pg`, read-only transactions for agent SQL) and CSV folders (loaded into in-memory SQLite; write-backs go to `<table>.retrofit.csv` sidecars). Introspection returns tables, columns, keys, row counts, enum-like distinct values and masked sample rows. |
+| `core/adapters` | `SourceAdapter` for SQLite (`better-sqlite3`, separate read-only connection), Postgres (`pg`, read-only transactions for agent SQL), MySQL / MariaDB (`mysql2`, `ANSI_QUOTES` sessions, read-only transactions) and spreadsheet sources. Spreadsheets (CSV folders, Excel workbooks via `exceljs`, Google Sheets read as `.xlsx` through their share link) share `TabularAdapter`: headers become safe columns ("Invoice #" → `Invoice_no`), a key column is inferred (or the row position), and the data is loaded into in-memory SQLite. The owner's files are never changed: write-backs and new rows are kept in a changes file, replayed over the latest data whenever `refresh()` sees the source has changed (called before every sync), and written into a copy (`*.retrofit.csv`, or the same workbook with formatting kept as `*.retrofit.xlsx`). Every adapter can `insert` (new invoices) as well as `update`. Introspection returns tables, columns, keys, defaults, row counts, enum-like distinct values and masked sample rows. |
 | `core/mapping` | Zod schema for `retrofit.map.json`; `validateMapping` checks it against the real schema (missing write-back columns are dropped with a warning, missing required columns are errors); `heuristicMapping` is the deterministic fallback mapper. |
 | `core/paypal` | Thin typed REST client (OAuth client credentials, cached token, `PayPal-Request-Id` idempotency, `Prefer: return=representation`), payload builders for invoices, products, plans and subscriptions. |
 | `core/engine` | `Retrofit`: planning, the action/policy gate, execution, write-back, state application. |
@@ -21,7 +21,15 @@
 | `core/terms` | Late fees and early-payment discounts: what is due, proposals, and the expected PayPal total (legacy total + adjustments) used by collections, risk, statements and reconciliation. |
 | `core/statements` | Customer balances, statements with aging, rendering as email. |
 | `core/commerce` | PayPal Orders checkout for the customer portal (several invoices), the shop and buyer agents; capture and booking. |
-| `mcp/shop` | Buyer-facing MCP server: catalogue search and checkout links for AI shopping agents. |
+| `mcp/shop` | The public MCP server: catalogue search and checkout links for AI shopping agents, and account tools (`my_invoices`, `pay_my_invoices`, `tell_the_business`) for a customer's own assistant, identified by their portal link. |
+| `core/new-invoice` | New invoices into the legacy system: the business's usual terms, next key and invoice number in its own pattern, its "ready to send" status, required columns it does not map filled sensibly, a new customer row when needed (or the customer on the invoice row, for one-sheet spreadsheets), line items; then a sync. Also the rule-based sentence reader used without Claude. |
+| `agents/invoice-draft` | The invoice reader: a sentence or a photo (base64 image block) plus the business's customers and catalogue → structured draft with questions for the owner. |
+| `core/autopay` | PayPal Vault: setup token → customer approval → payment token; `charge_autopay` actions for due invoices, charged as Orders with `vault_id` and booked like portal payments; collections hold for covered invoices; `VAULT.PAYMENT-TOKEN.DELETED` turns it off. |
+| `core/qr` | PayPal's `generate-qr-code` for an invoice (base64 PNG, parsed defensively), with a local QR of the same pay link as the fallback. |
+| `core/requests` | Customer requests (promise, plan, question) from the portal or a customer's assistant. |
+| `core/golive` | The go-live checklist, computed from observed state: verified webhook events, payments received and written back, credentials that authenticate. |
+| `core/today` | The owner's home screen: needs (approvals, requests, disputes, mismatches, invoices ready, reminders and autopay due, set-up), money this week and recent activity. |
+| `server/widget` | `/widget.js` for the business's own website (Shadow DOM; Pay a bill, Pay buttons, catalogue), `/widget/lookup` and `/pay` (number + email, rate limited, CORS for lookups), `/llms.txt`, pay slips and QR images, and the demo's `/site`. |
 | `core/digest` | Builds the owner's digest, renders it as HTML email, text and Slack Block Kit, signs and verifies approval-link tokens, decides when the scheduled digest is due. |
 | `cli` | Commander CLI; `demo` mounts mock PayPal and Fernhill next to the console. |
 | `mock-paypal` | In-memory PayPal stand-in with signed webhooks and buyer pages; used by tests and the offline demo. |
@@ -52,6 +60,18 @@ The early-payment discount is added to new PayPal invoices as a fixed `invoice_d
 ## Owner's digest
 
 `buildDigest` reads payments since the last digest (`meta.digest.lastSentAt`), pending and scheduled actions, the collections plan, risk, forecast and discrepancies. `renderDigest` produces the email (table layout, inline styles), text and Slack blocks. Approval links are `/a/<base64url(id.expiry)>.<HMAC-SHA256 prefix>` signed with `RETROFIT_LINK_SECRET` or a secret kept in the state store; GET shows the action, POST approves or rejects through `Retrofit.approve` / `reject`. Each send is recorded in the `digests` table with per-channel results. The server checks every minute whether the digest is due (business time zone, weekdays, at most once per local day, within three hours of the set time).
+
+## New invoices, from a sentence or a photo
+
+`POST /api/invoices/draft` sends the text or a downscaled JPEG (at most 1600 px, from the browser) to the invoice reader with the business's customers and catalogue; without Claude, sentences go to `parseInvoiceText`. The owner edits the draft in the console. `POST /api/invoices` calls `addInvoice`, which introspects the source for keys and defaults, inserts the customer (if new), the invoice in the business's own numbering and "ready to send" status (or its draft status), and the line items, then runs a sync: `create_invoice` and `send_invoice` go through the policy gate like any other action, and write-back follows.
+
+## Autopay
+
+The portal's **Set up autopay** creates a Vault setup token (`usage_type: MERCHANT`, `customer_type: CONSUMER`, the customer's cap stored with it) and sends the customer to PayPal's approval link; the return URL exchanges it for a payment token. `runCollections` first calls `runAutopay`: for each customer on autopay, invoices that are due, open in PayPal, within the cap, not disputed, not on a plan and without an open request become `charge_autopay` actions (default policy `auto`; the owner's amount rules and daily limits apply). Execution creates an Order with `payment_source.paypal.vault_id` (PayPal completes it without the buyer) and books it like a portal payment: a PayPal payment recorded on the invoice, write-back, fee in the ledger. A failed charge is not retried; collections stop holding that invoice and remind as usual.
+
+## Website and paper
+
+`widget.js` is generated per workspace with its base URL. It mounts into Shadow DOM so the host site's CSS cannot break it. Lookups need both the invoice number and the customer's email and are limited to 20 per IP per 10 minutes; the response holds only that invoice's amount and status, its PayPal pay link and the customer's signed portal link. Pay slips and printed statements embed QR codes: PayPal's own for an invoice, a local one for the portal link.
 
 ## Payment plans
 
@@ -108,6 +128,7 @@ adjustments(id, legacy_pk, kind, amount, status, detail, until, created_at, upda
 requests(id, customer_pk, legacy_pk, kind, detail, until, installments, status, created_at, resolved_at)
 orders(id, paypal_order_id, channel, status, items, invoices, total, currency, buyer, approve_url, capture_id, fee, created_at, updated_at)
 outbox(id, kind, customer_pk, recipient, subject, html, text, status, detail, created_at)
+autopay(customer_pk, status, setup_token_id, payment_token_id, paypal_customer_id, payer_email, max_amount, last_error, last_charge_at, created_at, updated_at)
 ```
 
 ## Security notes

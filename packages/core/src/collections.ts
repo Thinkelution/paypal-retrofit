@@ -11,6 +11,7 @@
  * The decision is deterministic and explained in one sentence. Sending still goes through the policy
  * engine, so reminders follow the owner's rules, daily limits and quiet hours.
  */
+import { autopayCovers, runAutopay } from './autopay.ts';
 import type { ActionRecord } from './types.ts';
 import type { Retrofit } from './engine.ts';
 import { loadInvoices } from './entities.ts';
@@ -106,6 +107,15 @@ export async function planCollections(rf: Retrofit, today = todayIso()): Promise
 
     if (disputes.has(inv.pk)) {
       push('hold', 'Open buyer dispute: reminders paused until it is resolved');
+      continue;
+    }
+    if (autopayCovers(rf, inv.customerPk, inv.pk, amountDue)) {
+      push(
+        'hold',
+        inv.due && inv.due > today
+          ? `On autopay: their saved PayPal is charged on the due date (${inv.due})`
+          : 'On autopay: their saved PayPal is charged in this run',
+      );
       continue;
     }
     if (queued) {
@@ -282,6 +292,8 @@ export interface CollectionsRun {
   proposed: Array<{ item: CollectionItem; action: ActionRecord }>;
   /** Late fees and discount expiries proposed under the owner's payment terms. */
   terms: ActionRecord[];
+  /** Charges on customers' saved PayPal for invoices that are due. */
+  autopay: ActionRecord[];
   writer: 'template' | 'ai';
 }
 
@@ -298,6 +310,8 @@ export async function runCollections(
     writer?: (items: CollectionItem[]) => Promise<Map<string, ReminderText>>;
   } = {},
 ): Promise<CollectionsRun> {
+  // Customers on autopay are charged first, so they never get a reminder for an invoice that is paid.
+  const autopay = opts.only ? [] : await runAutopay(rf, { today: opts.today, origin: opts.origin });
   const items = await planCollections(rf, opts.today);
   const todo = items.filter(
     (i) =>
@@ -354,6 +368,6 @@ export async function runCollections(
   }
   const terms = opts.only ? [] : await runTerms(rf, { today: opts.today, origin: opts.origin });
   rf.state.setMeta('lastCollectionsAt', new Date().toISOString());
-  rf.emit('collections', { proposed: proposed.length + terms.length });
-  return { items: await planCollections(rf, opts.today), proposed, terms, writer };
+  rf.emit('collections', { proposed: proposed.length + terms.length + autopay.length });
+  return { items: await planCollections(rf, opts.today), proposed, terms, autopay, writer };
 }

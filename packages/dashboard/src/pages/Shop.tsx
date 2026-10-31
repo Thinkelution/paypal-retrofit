@@ -260,7 +260,8 @@ export function Shop({ dark, config, toast }: { dark: boolean; config: Config; t
             A shopping assistant (Claude or any MCP client) gets four tools: <code>list_products</code>,{' '}
             <code>search_catalog</code>, <code>create_checkout</code> (returns a PayPal link for the person to
             approve) and <code>get_checkout_status</code>. Orders above {fmtMoney(form.maxOrderTotal, cur)}{' '}
-            are refused.
+            are refused. Your existing customers' assistants use the same endpoint with their portal link:{' '}
+            <code>my_invoices</code>, <code>pay_my_invoices</code> and <code>tell_the_business</code>.
           </p>
           <div className="snippet-head">
             <b>Try it with Claude Code</b>

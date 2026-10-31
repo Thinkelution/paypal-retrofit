@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, describe, expect, it } from 'vitest';
+import { actionLinkSecret, listCustomers, signPortalToken } from '../../core/src/index.ts';
 import { harness } from '../../core/test/helpers.ts';
 import { createShopMcpServer } from '../src/shop.ts';
 
@@ -27,6 +28,9 @@ describe('buyer-facing shop MCP', () => {
       'search_catalog',
       'create_checkout',
       'get_checkout_status',
+      'my_invoices',
+      'pay_my_invoices',
+      'tell_the_business',
     ]);
     const found = JSON.parse(
       textOf(await client.callTool({ name: 'search_catalog', arguments: { query: 'portrait' } })),
@@ -80,7 +84,64 @@ describe('buyer-facing shop MCP', () => {
     expect(sale).toMatchObject({ legacyPk: co.checkoutId, gross: product.price, kind: 'payment' });
     expect(sale!.fee).toBeGreaterThan(0);
 
+    // Without a shop, only the tools for existing customers remain.
     h.rf.mapping.commerce = { ...h.rf.mapping.commerce, enabled: false };
-    expect((await client.listTools()).tools).toEqual([]);
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual([
+      'my_invoices',
+      'pay_my_invoices',
+      'tell_the_business',
+    ]);
+  });
+
+  it("lets a customer's own assistant see their bills, pay two in one checkout and ask for more time", async () => {
+    const h = await harness();
+    cleanups.push(h.close);
+    await h.rf.sync();
+    const server = createShopMcpServer(h.rf, { baseUrl: 'https://studio.example' });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'assistant', version: '1.0.0' });
+    await Promise.all([server.connect(a), client.connect(b)]);
+    cleanups.push(() => client.close());
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const r = await client.callTool({ name, arguments: args });
+      if (r.isError) throw new Error(textOf(r));
+      return JSON.parse(textOf(r));
+    };
+
+    const customer = (await listCustomers(h.rf)).find((c) => c.openInvoices >= 3)!;
+    const link = `https://studio.example/p/${signPortalToken(actionLinkSecret(h.rf), customer.pk)}`;
+    await expect(
+      call('my_invoices', { portal_link: 'https://studio.example/p/forged.token' }),
+    ).rejects.toThrow(/not valid/);
+    const mine = await call('my_invoices', { portal_link: link });
+    expect(mine).toMatchObject({ customer: customer.name, balance: customer.balance, autopay: 'off' });
+    expect(mine.invoices).toHaveLength(customer.openInvoices);
+
+    const [first, second, third] = mine.invoices;
+    const co = await call('pay_my_invoices', {
+      portal_link: link,
+      invoices: [first.number, second.number],
+      agent: 'Claude',
+    });
+    expect(co.invoices.map((i: any) => i.number)).toEqual([first.number, second.number]);
+    expect(co.total).toBeCloseTo(first.amount + second.amount, 2);
+    expect(co.approveUrl).toMatch(/\/mock\/checkout\//);
+    await h.mock.approveOrder(co.approveUrl.split('/').pop());
+    await new Promise((r) => setTimeout(r, 400));
+    expect(h.rf.state.getOrder(co.checkoutId)).toMatchObject({ status: 'COMPLETED', channel: 'agent' });
+    const after = await call('my_invoices', { portal_link: link });
+    expect(after.invoices.map((i: any) => i.number)).not.toContain(first.number);
+
+    const told = await call('tell_the_business', {
+      portal_link: link,
+      invoice: third.number,
+      kind: 'promise',
+      pay_by: '2099-01-31',
+    });
+    expect(told.next).toMatch(/2099-01-31/);
+    expect(h.rf.state.listRequests({ status: 'open', customerPk: customer.pk })[0]).toMatchObject({
+      kind: 'promise',
+      until: '2099-01-31',
+    });
   });
 });

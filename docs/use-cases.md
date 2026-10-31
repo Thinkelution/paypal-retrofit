@@ -219,3 +219,73 @@ In the Xero and QuickBooks exports each fee is its own negative line, so they re
 
 **See it.** Client picker → **All clients…** in the demo.
 
+---
+
+## 18. The plumber in the van
+
+**Real life.** The job is done, the job sheet is handwritten on a clipboard, and the invoice usually gets typed up on Sunday night.
+
+**Logic.** **+ New invoice → Snap a job sheet**: the photo goes to Claude with the business's customers and catalogue. It returns a draft (customer, lines, due date, a note) and lists anything it could not read for certain. The owner checks it; retrofit writes it into the business's own system with the next invoice number and the "ready to send" status, then sends it through PayPal. Typing works too: "Invoice Harbor View Apartments $420 for the boiler service, due in 14 days".
+
+**See it.** Today → **+ New invoice**. Photos need `ANTHROPIC_API_KEY`; sentences work without it.
+
+---
+
+## 19. "Our books are a spreadsheet"
+
+**Real life.** A tutor keeps every invoice in one Google Sheet: date, client, email, amount, due date, status.
+
+**Logic.** Paste the share link in the setup wizard. retrofit reads the whole spreadsheet, makes "Invoice #" and "Due Date" usable, recognises that each row carries the customer, and re-reads the sheet on every sync, so a new row becomes a PayPal invoice. An Excel workbook works the same, and retrofit writes a copy of it with PayPal ids, pay links and payments filled in, formatting kept.
+
+**See it.** **⋯ → Try your own data → Connect a Google Sheet** (or upload a workbook).
+
+---
+
+## 20. "Can I pay on your website?"
+
+**Real life.** Customers look for a Pay button on the business's site, which was built years ago and nobody wants to touch.
+
+**Logic.** One line, `<script src=".../widget.js" data-float="pay-bill" async></script>`, adds **Pay a bill**: the customer types the invoice number and their email, and goes straight to PayPal. The same script can show Pay buttons on invoice pages and the catalogue with **Book and pay**. Lookups need the number and the email together and are rate limited.
+
+**See it.** **⋯ → Business website ↗**.
+
+---
+
+## 21. Paper invoices still exist
+
+**Real life.** Some customers get a printed invoice, or the owner hands one over at the door.
+
+**Logic.** Every invoice in PayPal has a printable **pay slip** with PayPal's own QR code: scanning it opens the pay page on the customer's phone. Printed statements carry a QR code for the customer's portal.
+
+**See it.** Invoices → open an invoice → **Pay slip with QR**.
+
+---
+
+## 22. "Just take it when it's due"
+
+**Real life.** A regular customer would rather not be reminded at all.
+
+**Logic.** In their portal the customer chooses **Set up autopay with PayPal**, optionally capped per invoice, and approves at PayPal (PayPal Vault). On the due date the collections run charges their saved PayPal for each invoice, books it like any PayPal payment, and never sends them a reminder. A declined charge is not retried: reminders take over. If the customer removes the business in their PayPal account, autopay turns off by webhook.
+
+**See it.** Customers → **Portal ↗** → **Set up autopay**; then **Run collections**.
+
+---
+
+## 23. "My assistant pays my bills"
+
+**Real life.** A customer asks their AI assistant to deal with what they owe a supplier.
+
+**Logic.** With the customer's portal link, the assistant uses the business's public MCP endpoint: `my_invoices` (what is open, overdue, on a plan), `pay_my_invoices` (one PayPal checkout for some or all of it) and `tell_the_business` (a date they will pay by, a request for a plan, a question). The assistant only ever hands back a PayPal link; the person approves.
+
+**See it.** `claude mcp add --transport http fernhill http://localhost:8787/mcp/shop`, then "here is my portal link: what do I owe Fernhill? Pay the two oldest."
+
+---
+
+## 24. "Is it safe to switch this on for real?"
+
+**Real life.** The owner tried the demo and wants to know what is left before real customers pay.
+
+**Logic.** **Go live** lists ten steps from the built-in simulator to the PayPal sandbox to live, each checked against what retrofit has actually seen: credentials that authenticate, a verified webhook event, a test payment that came back, the paid status written into their own system, their rules, the digest, Claude. One-click fixes where possible (register the webhook, sync, reconcile).
+
+**See it.** Sidebar → **Go live**.
+

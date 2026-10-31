@@ -49,8 +49,8 @@ console.log(
 );
 
 // ---- the rest of the platform: a buyer agent's order, and the second client (Brightside Plumbing)
-const mcp = async (name, args) => {
-  const r = await fetch(`${base}/mcp/shop`, {
+const mcp = async (name, args, path = '/mcp/shop') => {
+  const r = await fetch(`${base}${path}`, {
     method: 'POST',
     headers: { ...J, accept: 'application/json, text/event-stream' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
@@ -103,4 +103,51 @@ if (bright) {
   await req({ kind: 'promise', date: new Date(Date.now() + 12 * 86400000).toISOString().slice(0, 10) });
   await req({ kind: 'question', message: 'Was the second visit included in the quote?' });
   console.log('brightside: one portal payment for two invoices, a promise and a question');
+}
+
+// ---- a new invoice from one sentence, and a customer on autopay (PayPal Vault)
+const draft = await post('/api/invoices/draft', {
+  text: 'Invoice Maya Okafor 2 hours at $95 for retouching, due Friday',
+});
+const added = await post('/api/invoices', { ...draft, send: true });
+console.log(`new invoice: ${added.number} for ${added.total} (${draft.engine}), PayPal ${added.paypal?.id}`);
+
+const fern = await call('/api/customers');
+const onAuto =
+  fern.find((c) => c.name === 'Daniel Reyes') ?? fern.find((c) => c.openInvoices && !c.openRequests);
+const autoPortal = new URL(onAuto.portalUrl).pathname;
+const start = await fetch(base + autoPortal + '/autopay', {
+  method: 'POST',
+  body: new URLSearchParams({ max: '' }),
+  redirect: 'manual',
+});
+const setup = start.headers.get('location').split('/').pop();
+await post(`/mock-paypal/mock/api/vault/${setup}/approve`);
+await fetch(`${base}${autoPortal}/autopay/return?approval_token_id=${setup}`, { redirect: 'manual' });
+const charged = await post('/api/autopay/run');
+console.log(
+  `autopay: ${onAuto.name} saved PayPal; ${charged.filter((a) => a.status === 'executed').length} invoice(s) charged`,
+);
+
+// ---- a Brightside customer's own AI assistant pays two bills over MCP
+if (bright) {
+  const customers = await call(`${C}/api/customers`);
+  const juniper =
+    customers.find((c) => c.name === 'Juniper Street Bakery') ?? customers.find((c) => c.openInvoices >= 2);
+  if (juniper?.portalUrl) {
+    const mine = await mcp('my_invoices', { portal_link: juniper.portalUrl }, `${C}/mcp/shop`);
+    const pick = mine.invoices
+      .filter((i) => i.payableOnline)
+      .slice(0, 2)
+      .map((i) => i.number);
+    if (pick.length) {
+      const co = await mcp(
+        'pay_my_invoices',
+        { portal_link: juniper.portalUrl, invoices: pick, agent: 'Claude' },
+        `${C}/mcp/shop`,
+      );
+      await post(`/mock-paypal/mock/api/orders/${co.approveUrl.split('/').pop()}/approve`);
+      console.log(`brightside: ${juniper.name}'s assistant paid ${pick.join(', ')} (${co.total})`);
+    }
+  }
 }

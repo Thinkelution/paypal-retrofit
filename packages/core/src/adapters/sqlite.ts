@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
-import type { Row, SchemaDescription, TableInfo } from '../types.ts';
+import type { Row, SchemaDescription, SourceKind, TableInfo } from '../types.ts';
 import {
   assertReadOnlySql,
   enumCandidates,
@@ -11,7 +11,7 @@ import {
 } from './common.ts';
 
 export class SqliteAdapter implements SourceAdapter {
-  readonly kind: 'sqlite' | 'csv' = 'sqlite';
+  readonly kind: SourceKind = 'sqlite';
   protected rw: Database.Database;
   protected ro: Database.Database;
 
@@ -41,6 +41,7 @@ export class SqliteAdapter implements SourceAdapter {
         type: string;
         notnull: number;
         pk: number;
+        dflt_value: unknown;
       }>;
       const fks = this.rw.prepare(`PRAGMA foreign_key_list(${quoteIdent(name)})`).all() as Array<{
         from: string;
@@ -58,6 +59,8 @@ export class SqliteAdapter implements SourceAdapter {
           type: c.type || 'TEXT',
           nullable: !c.notnull && !c.pk,
           pk: c.pk > 0,
+          // An INTEGER PRIMARY KEY is filled by SQLite.
+          hasDefault: c.dflt_value != null || (c.pk > 0 && /^int/i.test(c.type)),
         })),
         foreignKeys: fks.map((f) => ({ column: f.from, refTable: f.table, refColumn: f.to ?? 'id' })),
         rowCount: n,
@@ -99,6 +102,15 @@ export class SqliteAdapter implements SourceAdapter {
     if (keys.length === 0) return;
     const sql = `UPDATE ${quoteIdent(table)} SET ${keys.map((k) => `${quoteIdent(k)} = ?`).join(', ')} WHERE ${quoteIdent(pkColumn)} = ?`;
     this.rw.prepare(sql).run(...(keys.map((k) => patch[k]) as any[]), pk as any);
+  }
+
+  async insert(table: string, _pkColumn: string, row: Row): Promise<Row> {
+    const keys = Object.keys(row);
+    const sql = `INSERT INTO ${quoteIdent(table)} (${keys.map(quoteIdent).join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`;
+    const { lastInsertRowid } = this.rw.prepare(sql).run(...(keys.map((k) => row[k]) as any[]));
+    return normaliseRow(
+      this.rw.prepare(`SELECT * FROM ${quoteIdent(table)} WHERE rowid = ?`).get(lastInsertRowid) as Row,
+    );
   }
 
   async close(): Promise<void> {

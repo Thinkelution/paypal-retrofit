@@ -12,10 +12,12 @@
     "@paypal-retrofit/core": "workspace:*",
     "@paypal-retrofit/mcp": "workspace:*",
     "express": "^4.21.1",
-    "nodemailer": "^7.0.13"
+    "nodemailer": "^7.0.13",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
-    "@types/nodemailer": "^8.0.2"
+    "@types/nodemailer": "^8.0.2",
+    "@types/qrcode": "^1.5.6"
   }
 }

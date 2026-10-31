@@ -333,7 +333,8 @@
     <nav aria-label="Sections">
       <a href="#how">How it works</a>
       <a href="#use-cases">Use cases</a>
-      <a href="#beyond">Beyond the SDK</a>
+      <a href="#easy">Plug and play</a>
+      <a href="#beyond" class="minor">Beyond the SDK</a>
       <a href="#around">Customers &amp; agents</a>
       <a href="#agents" class="minor">Agents</a>
       <a href="#safety" class="minor">Safety</a>
@@ -355,26 +356,28 @@
       <p class="lede">paypal-retrofit lets an AI agent wire PayPal into the system a business already runs on: its own database, its own invoice numbers, its own customers. Then it keeps both sides reconciled, and every action that moves money follows a rule the owner set.</p>
       <div class="ctas">
         <a class="btn primary" href="#start">Run the demo in two minutes</a>
+        <a class="btn" href="https://codespaces.new/Thinkelution/paypal-retrofit?quickstart=1">Open in Codespaces</a>
         <a class="btn" href="https://github.com/Thinkelution/paypal-retrofit">View the source</a>
-        <a class="btn" href="#how">See how it works</a>
       </div>
       <div class="hero-meta">
         <span>No schema changes</span>
-        <span>SQLite, Postgres or CSV</span>
+        <span>SQLite, Postgres, MySQL, CSV, Excel or a Google Sheet</span>
+        <span>One click: Docker, Codespaces, Render</span>
         <span>Collections, payment plans and cash forecast built in</span>
         <span>No-code setup, morning digest and an MCP server</span>
-        <span>Customer portal, agent checkout, multi-client</span>
+        <span>Customer portal, autopay, agent checkout, multi-client</span>
+        <span>Invoices from a sentence or a photo of a job sheet</span>
         <span>Runs offline with a bundled PayPal mock</span>
         <span>PayPal sandbox ready</span>
       </div>
       <div class="shot">
-        <div class="bar"><i></i><i></i><i></i><span>Retrofit console · Fernhill Studio demo</span></div>
-        <img src="assets/console.png" width="1440" height="900" alt="Retrofit console: totals for money owed, overdue and collected through PayPal above a ledger of invoices showing each one's status in the legacy system and in PayPal.">
+        <div class="bar"><i></i><i></i><i></i><span>Retrofit console · Today · Fernhill Studio demo</span></div>
+        <img src="assets/console.png" width="1440" height="900" alt="Retrofit console opening on Today: a greeting with what is owed and overdue, totals for this week, a Needs you list with one button per item (approvals, a dispute, set-up), recent payments and a grouped sidebar.">
       </div>
       <div class="stats">
         <div class="stat"><b>1 command</b><span>to map an existing schema to PayPal objects</span></div>
         <div class="stat"><b>0 changes</b><span>to the business's tables; write-back only to columns it allows</span></div>
-        <div class="stat"><b>17 events</b><span>of PayPal webhooks verified and applied</span></div>
+        <div class="stat"><b>19 events</b><span>of PayPal webhooks verified and applied</span></div>
         <div class="stat"><b>6 playbooks</b><span>for collections, plans, refunds, quiet hours, cash forecast and month-end</span></div>
       </div>
     </div>
@@ -684,7 +687,61 @@
     </div>
   </section>
 
-  <section id="around">
+  <section id="easy">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Plug and play</span>
+        <h2 style="margin-top:14px">Nothing to rebuild. Nothing to learn.</h2>
+        <p>retrofit meets a small business where it already is: the spreadsheet, the old app, the paper job sheet, the website nobody wants to touch. The owner opens it to one screen that says what needs them.</p>
+      </div>
+      <div class="uc-grid">
+        <article class="uc">
+          <p class="quote">“I just want to try it.”</p>
+          <h3>One click to run</h3>
+          <p>Open in GitHub Codespaces, Deploy to Render, or one <code>docker run</code>. The demo needs no accounts: a PayPal simulator is built in.</p>
+          <div class="uses"><span>Docker</span><span>Codespaces</span><span>Render</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“Our books are a spreadsheet.”</p>
+          <h3>Whatever the back office is</h3>
+          <p>SQLite, Postgres, MySQL, CSV exports, an Excel workbook or a Google Sheet link. One sheet with everything works; the owner's files are never changed.</p>
+          <div class="uses"><span>Excel</span><span>Google Sheets</span><span>MySQL</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“What needs me today?”</p>
+          <h3>Today, one button each</h3>
+          <p>The console opens on the owner's day: what is owed, what came in, and each decision waiting for them. A short tour, and Ctrl+K to jump, run or ask anything.</p>
+          <div class="uses"><span>Today</span><span>Ctrl+K</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“Invoice Maya $190 for retouching, due Friday.”</p>
+          <h3>Say it or snap it</h3>
+          <p>Type a sentence, or photograph a handwritten job sheet: Claude reads it against your own customers and catalogue, asks about anything unclear, and the invoice goes into your system and out through PayPal.</p>
+          <div class="uses"><span>Claude vision</span><span>Invoicing</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“Can I pay on your website?”</p>
+          <h3>Your website, and paper too</h3>
+          <p>One script tag adds Pay a bill and Book and pay to the existing site. Pay slips and printed statements carry PayPal QR codes.</p>
+          <div class="uses"><span>Widget</span><span>PayPal QR</span></div>
+        </article>
+        <article class="uc">
+          <p class="quote">“Just take it when it's due.”</p>
+          <h3>Autopay and the customer's assistant</h3>
+          <p>Customers save PayPal once and invoices are paid on their due date. Their own AI assistant can see and pay their bills; a person approves every payment.</p>
+          <div class="uses"><span>PayPal Vault</span><span>MCP</span></div>
+        </article>
+      </div>
+      <div class="showcase">
+        <figure><button type="button" data-full="assets/newinvoice.png"><img src="assets/newinvoice.png" width="1440" height="820" alt="New invoice drawer: a draft read from one sentence, with the customer recognised as existing, a line of 2 hours at 95 dollars, a due date and an Add and send button." loading="lazy"></button><figcaption><b>New invoice</b>One sentence becomes a checked draft, then an invoice in Fernhill's own database and a PayPal invoice.</figcaption></figure>
+        <figure><button type="button" data-full="assets/site.png"><img src="assets/site.png" width="1280" height="860" alt="Fernhill Studio's website with a Pay a bill window showing an invoice of 190 dollars and a Pay with PayPal button, above a catalogue of sessions with Book and pay buttons." loading="lazy"></button><figcaption><b>Pay a bill on their own website</b>Invoice number and email, then PayPal. Added with one line.</figcaption></figure>
+        <figure><button type="button" data-full="assets/golive.png"><img src="assets/golive.png" width="1440" height="1000" alt="Go live page: progress through ten steps from the simulator to the PayPal sandbox to live, with each step checked, waiting or explained." loading="lazy"></button><figcaption><b>Go live</b>Ten steps from the simulator to real payments, each checked against what retrofit has actually seen.</figcaption></figure>
+        <figure><button type="button" data-full="assets/palette.png"><img src="assets/palette.png" width="1440" height="760" alt="Command palette over the Today page, offering to turn a typed sentence into a new invoice or to ask the agent." loading="lazy"></button><figcaption><b>Ctrl+K</b>Go anywhere, run anything, or turn a sentence into an invoice.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="alt" id="around">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Around the business</span>
@@ -752,7 +809,7 @@
     </div>
   </section>
 
-  <section class="alt" id="agents">
+  <section id="agents">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">AI agents</span>
@@ -799,7 +856,7 @@
     </div>
   </section>
 
-  <section id="safety">
+  <section class="alt" id="safety">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Safety</span>
@@ -834,7 +891,7 @@
     </div>
   </section>
 
-  <section class="alt" id="screens">
+  <section id="screens">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">The console</span>
@@ -842,16 +899,17 @@
         <p>Every table is built on AG Grid Community: filters, quick search, bulk selection, custom status cells, CSV export and editable mapping grids. Click any image to enlarge it.</p>
       </div>
       <div class="gallery">
+        <figure><button type="button" data-full="assets/invoices.png"><img src="assets/invoices.png" width="1440" height="900" alt="Invoices page: totals above an AG Grid ledger of invoices with status in the legacy system and in PayPal, days overdue, risk and expected payment date." loading="lazy"></button><figcaption><b>Invoices</b>Every invoice in your system next to its PayPal invoice, with risk and the expected payment date (AG Grid).</figcaption></figure>
         <figure><button type="button" data-full="assets/mapping.png"><img src="assets/mapping.png" width="1440" height="1000" alt="Mapping page: an editable grid of fields and columns with the Mapper agent's reasons, plus grids for status meanings and action policies." loading="lazy"></button><figcaption><b>Mapping</b>Field-by-field mapping with the Mapper's reasons. Change a column, a status meaning or a policy and save.</figcaption></figure>
-        <figure><button type="button" data-full="assets/discrepancies.png"><img src="assets/discrepancies.png" width="1440" height="760" alt="Discrepancies page showing a buyer dispute against an invoice with a suggested fix and a Resolve button." loading="lazy"></button><figcaption><b>Discrepancies</b>Disputes, refunds and mismatches found by webhooks and reconciliation, each with a suggested fix.</figcaption></figure>
+        <figure><button type="button" data-full="assets/discrepancies.png"><img src="assets/discrepancies.png" width="1440" height="760" alt="Mismatches page showing a buyer dispute against an invoice with a suggested fix and a Resolve button." loading="lazy"></button><figcaption><b>Mismatches</b>Disputes, refunds and mismatches found by webhooks and reconciliation, each with a suggested fix.</figcaption></figure>
         <figure class="third"><button type="button" data-full="assets/drawer.png"><img src="assets/drawer.png" width="1440" height="900" alt="Record drawer comparing an invoice in the legacy system with its PayPal invoice." loading="lazy"></button><figcaption><b>Record detail</b>Your system and PayPal, side by side.</figcaption></figure>
         <figure class="third"><button type="button" data-full="assets/pay.png"><img src="assets/pay.png" width="900" height="620" alt="Customer payment page from the bundled mock PayPal, labelled test payments only." loading="lazy"></button><figcaption><b>Customer pay page (mock)</b>The offline demo's stand-in for PayPal checkout. No money moves.</figcaption></figure>
-        <figure class="third"><button type="button" data-full="assets/mobile.png"><img src="assets/mobile.png" width="780" height="1688" alt="The Retrofit console on a phone, with totals stacked above the ledger." loading="lazy"></button><figcaption><b>On a phone</b>The console works at phone width.</figcaption></figure>
+        <figure class="third"><button type="button" data-full="assets/mobile.png"><img src="assets/mobile.png" width="780" height="1688" alt="The Retrofit console on a phone: Today with the greeting, totals in two columns and the Needs you list." loading="lazy"></button><figcaption><b>On a phone</b>Today, at phone width; the sidebar slides in from a menu button.</figcaption></figure>
       </div>
     </div>
   </section>
 
-  <section id="paypal">
+  <section class="alt" id="paypal">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">PayPal platform</span>
@@ -861,10 +919,12 @@
         <table>
           <thead><tr><th>Area</th><th>Used for</th></tr></thead>
           <tbody>
-            <tr><td>Invoicing v2</td><td>Create, get, update, send, remind, cancel, record payment, record refund, search</td></tr>
+            <tr><td>Invoicing v2</td><td>Create, get, update, send, remind, cancel, record payment, record refund, search, partial payments, discounts, QR codes for paper invoices</td></tr>
+            <tr><td>Orders v2</td><td>One checkout for several invoices in the customer portal, shop and AI-agent checkouts, and autopay charges on a saved PayPal (<code>vault_id</code>)</td></tr>
+            <tr><td>Vault v3</td><td>Setup and payment tokens: customers save PayPal once for autopay</td></tr>
             <tr><td>Payments v2</td><td>Refunding captured invoice payments</td></tr>
             <tr><td>Catalog Products, Billing Plans, Subscriptions</td><td>Turning recurring agreements such as retainers into PayPal subscriptions</td></tr>
-            <tr><td>Webhooks v1</td><td>Registering the endpoint, signature verification, 17 event types across invoices, captures, checkout orders, subscriptions, sales and disputes</td></tr>
+            <tr><td>Webhooks v1</td><td>Registering the endpoint, signature verification, 19 event types across invoices, captures, checkout orders, subscriptions, sales, disputes and vault payment tokens</td></tr>
             <tr><td>Disputes v1</td><td>Listing and reading disputes for the Support agent; accepting claims only if the owner allows it</td></tr>
             <tr><td>Transaction Search</td><td>Fees and transaction history for the Ops agent</td></tr>
             <tr><td>PayPal Agent Toolkit</td><td>The Ops agent's read-only PayPal tools in sandbox and production; writes are deliberately not exposed</td></tr>
@@ -874,7 +934,7 @@
     </div>
   </section>
 
-  <section class="alt" id="start">
+  <section id="start">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Quick start</span>
@@ -883,19 +943,23 @@
       </div>
       <div class="qs">
         <div class="code">
-<pre class="term" id="qs-code"><span class="d"># Node 20+ with corepack</span>
+<pre class="term" id="qs-code"><span class="d"># one line, with Docker</span>
+<span class="p">$</span> docker run --rm -p 8787:8787 $(docker build -q https://github.com/Thinkelution/paypal-retrofit.git)
+
+<span class="d"># or from source: Node 20+ with corepack</span>
 <span class="p">$</span> git clone https://github.com/Thinkelution/paypal-retrofit.git
 <span class="p">$</span> cd paypal-retrofit
 <span class="p">$</span> corepack enable && pnpm install && pnpm build
 <span class="p">$</span> pnpm retrofit demo --fresh
 
 <span class="g">paypal-retrofit demo</span> <span class="d">(mock PayPal, no account needed)</span>
-  Dashboard     <span class="b">http://localhost:8787/</span>
+  Console       <span class="b">http://localhost:8787/</span>
+  Website       <span class="b">http://localhost:8787/site</span>
   Legacy app    <span class="b">http://localhost:8787/fernhill</span>
 
 <span class="d"># your own system, against the PayPal sandbox</span>
 <span class="p">$</span> cp .env.example .env    <span class="d"># PayPal sandbox app + ANTHROPIC_API_KEY</span>
-<span class="p">$</span> pnpm retrofit init --source postgres://…   <span class="d"># or sqlite:… / csv:…</span>
+<span class="p">$</span> pnpm retrofit init --source postgres://…   <span class="d"># or mysql:// sqlite: csv: excel: gsheet:</span>
 <span class="p">$</span> pnpm retrofit sync --dry-run
 <span class="p">$</span> pnpm retrofit serve</pre>
           <button class="copy" type="button" data-copy="qs-code">Copy</button>
@@ -904,7 +968,8 @@
           <div class="note">
             <h3>What to try</h3>
             <ol>
-              <li>Press <b>Send 22 invoices through PayPal</b>.</li>
+              <li>On <b>Today</b>, press <b>Send now</b> on the 22 invoices ready to send.</li>
+              <li><b>+ New invoice</b>: type one sentence, check the draft, send it.</li>
               <li>Open an invoice, press <b>Pay as customer</b>, and pay.</li>
               <li>Watch the legacy app's row turn <code>paid</code>.</li>
               <li>Approve the new retainer as a subscription.</li>
@@ -912,7 +977,9 @@
               <li>Open <b>Digest</b> and approve a reminder from its <b>Review</b> link.</li>
               <li>Press <b>Try your own data</b> and set up the sample plumbing business.</li>
               <li>Open the <b>Shop</b> and buy a session, or let Claude buy it over MCP.</li>
-              <li>Switch to Brightside and pay two invoices from a customer's <b>Portal</b>.</li>
+              <li>Switch to Brightside and pay two invoices from a customer's <b>Portal</b>, or set up autopay.</li>
+              <li>Open the business <b>website</b> and use <b>Pay a bill</b>.</li>
+              <li>Walk through <b>Go live</b>.</li>
             </ol>
           </div>
           <div class="note">
@@ -924,7 +991,7 @@
     </div>
   </section>
 
-  <section id="hackathon">
+  <section class="alt" id="hackathon">
     <div class="wrap">
       <div class="hack">
         <div>
@@ -932,13 +999,13 @@
           <h2 style="margin-top:14px">Built for “Build What's Next with PayPal and AI”.</h2>
           <p>A new, open-source project that makes PayPal integration practical for businesses that already have a system, with AI doing the integration work and a deterministic engine doing the money work.</p>
           <div class="chips">
-            <span>TypeScript</span><span>Node.js</span><span>Express</span><span>React</span><span>AG Grid</span><span>SQLite</span><span>PostgreSQL</span><span>PayPal REST</span><span>PayPal Agent Toolkit</span><span>Claude</span><span>Render</span>
+            <span>TypeScript</span><span>Node.js</span><span>Express</span><span>React</span><span>AG Grid</span><span>SQLite</span><span>PostgreSQL</span><span>MySQL</span><span>Excel</span><span>Google Sheets</span><span>PayPal REST</span><span>PayPal Agent Toolkit</span><span>MCP</span><span>Claude</span><span>Docker</span><span>Render</span>
           </div>
           <p style="margin-top:20px"><a class="btn primary" href="https://paypalaihackathon.devpost.com/">About the hackathon</a></p>
         </div>
         <ul class="criteria">
-          <li><b>PayPal at the centre.</b> Invoicing, subscriptions, webhooks, disputes and the Agent Toolkit.</li>
-          <li><b>AI that does real work.</b> Schema mapping, receivables operations and dispute drafting.</li>
+          <li><b>PayPal at the centre.</b> Invoicing, Orders, Vault, subscriptions, webhooks, disputes and the Agent Toolkit.</li>
+          <li><b>AI that does real work.</b> Schema mapping, reading job-sheet photos, receivables operations and dispute drafting, plus agentic commerce on both sides.</li>
           <li><b>A complete product.</b> CLI, console, offline demo, tests and docs for judges.</li>
           <li><b>A real audience.</b> Small businesses whose payment data lives in a system they can't rebuild.</li>
         </ul>
@@ -946,20 +1013,22 @@
     </div>
   </section>
 
-  <section class="alt" id="faq">
+  <section id="faq">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">FAQ</span>
         <h2 style="margin-top:14px">Questions</h2>
       </div>
       <div class="faq">
-        <details><summary>Does it change my database?</summary><p>No schema changes, ever. Retrofit reads your tables and writes only to the columns your mapping names, such as a PayPal invoice id or a paid date. If you have no such columns, it keeps the links in its own state store. For CSV sources it writes to sidecar files and leaves the originals untouched.</p></details>
+        <details><summary>Does it change my database?</summary><p>No schema changes, ever. Retrofit reads your tables and writes only to the columns your mapping names, such as a PayPal invoice id or a paid date. If you have no such columns, it keeps the links in its own state store. For CSV, Excel and Google Sheets sources it writes to a copy and leaves your files untouched.</p></details>
         <details><summary>Do I need a PayPal account to try it?</summary><p>No. The demo ships with a local stand-in for the PayPal endpoints retrofit uses, with signed webhooks and customer pay pages. To use the real PayPal sandbox, create a free developer app and run the demo with <code>--sandbox</code>.</p></details>
         <details><summary>Can the AI move money on its own?</summary><p>Only within rules you set. Agents can only propose actions; each kind of action has a policy (auto, confirm or never), optionally by amount, with daily caps. By default small refunds run on their own, larger ones, cancellations and reminders wait for your approval, and accepting disputes is refused.</p></details>
-        <details><summary>Do I need to be technical?</summary><p>No. Run <code>paypal-retrofit serve</code> (or use a hosted copy) and the console opens a four-step setup wizard: upload CSV exports, check the mapping, choose your rules in plain words, preview, go live. After that the morning digest comes to your inbox or Slack, and you approve things from your phone.</p></details>
+        <details><summary>Do I need to be technical?</summary><p>No. Open it in Codespaces, run the Docker image, or use a hosted copy, and the console opens a four-step setup wizard: upload a spreadsheet or CSV exports (or paste a Google Sheet link), check the mapping, choose your rules in plain words, preview, go live. The <b>Go live</b> checklist walks you from the simulator to real payments. After that the morning digest comes to your inbox or Slack, and you approve things from your phone.</p></details>
         <details><summary>Can I use it from Claude Desktop or Claude Code?</summary><p>Yes. retrofit is an MCP server: <code>paypal-retrofit mcp</code> over stdio, or <code>/mcp</code> over HTTP. Your Claude gets the same tools and the same rules as the built-in agent; anything that needs your OK still waits for it. Approving from the client is off unless you turn it on.</p></details>
         <details><summary>Can AI shopping agents buy from my business?</summary><p>Yes, if you switch the shop on. retrofit turns your own product or services table into a catalogue that buyers' agents can search over MCP (<code>/mcp/shop</code>) and check out through PayPal. Prices always come from your data, you set the largest order, and the agent can only hand its user a PayPal link: a person approves every payment.</p></details>
         <details><summary>I'm a bookkeeper. Can I run this for all my clients?</summary><p>Yes. <code>paypal-retrofit practice --dir clients</code> runs every client folder as its own workspace (its own data, PayPal account, rules and digest) and gives you one overview sorted by who needs attention. Add clients with the setup wizard.</p></details>
+        <details><summary>Our books are an Excel file or a Google Sheet. Does that work?</summary><p>Yes. Upload the workbook or paste the sheet's share link in the setup wizard. retrofit re-reads it on every sync, so new rows become PayPal invoices, and it never changes your file: it writes a copy with PayPal ids, pay links and payments filled in. One sheet with everything (date, customer, email, amount, status) is fine.</p></details>
+        <details><summary>How do customers pay if my website is old?</summary><p>One script tag adds a <b>Pay a bill</b> button (invoice number and email, then PayPal) and, if you sell online, your catalogue with <b>Book and pay</b>. For paper invoices, every invoice has a printable pay slip with PayPal's QR code.</p></details>
         <details><summary>Which AI model does it use?</summary><p>Claude through the official Anthropic SDK, defaulting to <code>claude-opus-5-5</code>. You can choose another model with <code>RETROFIT_MODEL</code>.</p></details>
         <details><summary>Is it production ready?</summary><p>Not yet. It is built and tested against PayPal's sandbox APIs and refuses production mode unless explicitly enabled. Treat it as a strong starting point, not a finished payments product.</p></details>
         <details><summary>Is this an official PayPal product?</summary><p>No. paypal-retrofit is an independent open-source project built on PayPal's public APIs and Agent Toolkit. It is not affiliated with or endorsed by PayPal.</p></details>

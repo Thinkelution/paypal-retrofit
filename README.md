@@ -2,7 +2,9 @@
 
 **Give any existing business a PayPal brain.** paypal-retrofit is an open-source SDK, CLI and console that lets an AI agent wire PayPal into a business system that already exists: its own database, its own invoice numbers, its own customers. Then it keeps both sides reconciled, with an agent that never moves money without a rule the owner set.
 
-It is also a product an owner can use without a developer: a **no-code setup wizard**, a **morning digest** by email or Slack with one-click approvals, and an **MCP server** so Claude Desktop, Claude Code or any MCP client can run receivables under the same rules. Their customers get a **self-service portal** and statements; new buyers and **AI shopping agents** can buy from the business's own catalogue through PayPal checkout; **late fees and early-payment discounts** run as owner rules; and a **bookkeeper** can run every client from one screen.
+It is also a product an owner can use without a developer: a **no-code setup wizard**, a **morning digest** by email or Slack with one-click approvals, and an **MCP server** so Claude Desktop, Claude Code or any MCP client can run receivables under the same rules. Their customers get a **self-service portal**, statements and **autopay**; new buyers, **AI shopping agents** and **customers' own assistants** can buy and pay through PayPal checkout; **late fees and early-payment discounts** run as owner rules; and a **bookkeeper** can run every client from one screen.
+
+It is **plug and play**: one click to run it (Docker, GitHub Codespaces, Render); the back office it already has as the source (SQLite, Postgres, MySQL, CSV exports, an Excel workbook or a Google Sheet link); one script tag for PayPal on the business's existing website; and a console that opens on **Today**: what needs the owner, with one button each. New invoices can be typed, said in a sentence, or **snapped from a paper job sheet**.
 
 > Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/) (October–November 2026). MIT licensed. Website: <https://thinkelution.github.io/paypal-retrofit/>
 
@@ -14,11 +16,52 @@ PayPal's Agent Toolkit and MCP server let an AI agent *call* PayPal. Nothing let
 
 ## What it does
 
-- **Maps your data to PayPal in one command.** `paypal-retrofit init` reads your schema (SQLite, Postgres or a folder of CSV exports), and Claude proposes how customers, services, invoices, line items and recurring agreements become PayPal objects, with a reason for every choice. You review it; nothing touches PayPal yet.
+- **Maps your data to PayPal in one command.** `paypal-retrofit init` reads your schema (SQLite, Postgres, MySQL, CSV exports, an Excel workbook or a Google Sheet), and Claude proposes how customers, services, invoices, line items and recurring agreements become PayPal objects, with a reason for every choice. You review it; nothing touches PayPal yet.
 - **Sends invoices and subscriptions through PayPal, and writes the results back.** `sync` creates PayPal invoices with your own invoice numbers, emails customers a pay link, and writes the PayPal id and link into the columns you allowed. Payments arrive by verified webhook and flip your legacy record to paid with the amount and date. A reconciler repairs anything a lost webhook missed.
 - **Runs your receivables with an agent you control.** The Ops agent answers “who owes us the most?” or “why is INV-1042 still unpaid?” from your database and PayPal, and lines up reminders, recorded payments or refunds. Every side effect goes through a policy you set: `auto`, `confirm` (waits for your approval) or `never`.
 
-![Retrofit console](site/assets/console.png)
+![Retrofit console: Today](site/assets/console.png)
+
+## Plug and play
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Thinkelution/paypal-retrofit?quickstart=1)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Thinkelution/paypal-retrofit)
+
+```bash
+docker build -t paypal-retrofit https://github.com/Thinkelution/paypal-retrofit.git
+docker run --rm -p 8787:8787 paypal-retrofit        # then open http://localhost:8787
+```
+
+Codespaces installs, builds and starts the demo, then opens the console in your browser. Render deploys `render.yaml` as one web service. Docker runs the demo, or your own business with `-v "$PWD:/work" -w /work paypal-retrofit serve`. CI builds the image and checks that it serves the console on every push.
+
+| Your back office | Connect it with | Write-back |
+| --- | --- | --- |
+| Most invoicing apps and ERPs | `sqlite:app.db`, `postgres://…`, `mysql://…` (also MariaDB) | Into the columns you allow; agent SQL runs read-only |
+| Exports from any tool | A folder of CSV files (`csv:./exports`) | Into `<table>.retrofit.csv` copies; a fresh export is picked up on the next sync |
+| A spreadsheet | An Excel workbook (`excel:jobs.xlsx`), uploaded in the wizard | Into `jobs.retrofit.xlsx`, the same workbook with formatting kept and PayPal columns added |
+| A Google Sheet | Its share link (Anyone with the link, Viewer) | Re-read every sync; PayPal ids and payments kept in retrofit and a downloadable copy |
+
+One sheet with everything works: when invoice rows carry the customer's name and email, retrofit (or Claude) uses the email as the customer key. Headers such as "Invoice #" and "Due Date" are fine. The owner's files are never changed.
+
+## Easy for the owner, easy for their customers
+
+| | What it does |
+| --- | --- |
+| **Today** | The console opens on the owner's day: what is owed, what came in this week, and what needs them, each as one card with one button (review approvals, answer customer requests, respond to a dispute, send new invoices, run collections, continue set-up). A five-step tour on first visit. |
+| **New invoice: type, say or snap** | "Invoice Maya Okafor 2 hours at $95 for retouching, due Friday", or a photo of a paper job sheet: Claude reads it (vision, structured output) against the business's own customers and catalogue, flags anything unclear, and the owner checks the draft. It is written into **their own system** with their numbering and statuses (a new customer too), then sent through PayPal. Without Claude, sentences are read by rules. |
+| **Ctrl+K** | Jump to any page, run collections or reconcile, start an invoice from a sentence, or ask the agent. |
+| **Go live checklist** | Ten steps from the built-in simulator to the PayPal sandbox to live, each checked against what retrofit actually sees: credentials, a verified webhook event, a test payment, the paid status written back. One-click fixes where possible. |
+| **Website & paper** | One script tag adds **Pay a bill** (invoice number + email, then PayPal), Pay buttons and the catalogue to the existing website. Every invoice has a printable **pay slip with PayPal's QR code**; printed statements carry a QR for the portal. `llms.txt` tells visiting assistants how to buy and pay. |
+| **Autopay** | Customers save PayPal once in their portal (**PayPal Vault**, with an optional cap per invoice). Invoices are then charged on their due date under the owner's rules, collections stop chasing them, and a declined charge falls back to normal reminders. Removing the business in PayPal turns it off by webhook. |
+| **The customer's own assistant** | A customer's Claude (or any MCP client) uses their portal link to see what they owe, pay several invoices in one PayPal checkout, or promise a date, ask for a plan or ask a question. A person approves every payment at PayPal. |
+
+| New invoice from a sentence | Pay a bill on the business's own website |
+| --- | --- |
+| ![New invoice drawer with a draft read from one sentence](site/assets/newinvoice.png) | ![Fernhill's website with the Pay a bill widget](site/assets/site.png) |
+
+| Go live checklist | Ctrl+K |
+| --- | --- |
+| ![Go live: ten checked steps from simulator to live](site/assets/golive.png) | ![Command palette turning a sentence into an invoice](site/assets/palette.png) |
 
 ## Built for how small businesses actually get paid
 
@@ -70,6 +113,8 @@ Or Claude Desktop over stdio (`claude_desktop_config.json`):
 
 ## Try it in two minutes (no accounts needed)
 
+One click: **Open in GitHub Codespaces** (above), or `docker run` as shown in [Plug and play](#plug-and-play). Or from source:
+
 ```bash
 git clone https://github.com/Thinkelution/paypal-retrofit.git
 cd paypal-retrofit
@@ -79,20 +124,21 @@ pnpm build
 pnpm retrofit demo --fresh
 ```
 
-Open <http://localhost:8787>. You get three things in one process:
+Open <http://localhost:8787>. Everything runs in one process:
 
 | URL | What it is |
 | --- | --- |
-| `/` | The Retrofit console for Fernhill (ledger, collections, customers, insights, approvals, digest, shop, discrepancies, mapping, webhooks, agent) |
+| `/` | The Retrofit console for Fernhill: Today, invoices, collections, cash and risk, customers, shop, website and QR, approvals, digest, go live, mapping, webhooks, agent |
+| `/site` | Fernhill's own website with the one-line widget: **Pay a bill** and **Book and pay** |
 | `/c/brightside/` | A second client, **Brightside Plumbing** (CSV exports, with late fees and early-payment discounts) |
 | `/#practice` | Every client on one screen (the bookkeeper's view) |
-| `/shop` | Fernhill's shop page for new buyers; `/mcp/shop` is the same shop for AI shopping agents |
+| `/shop` | Fernhill's shop page for new buyers; `/mcp/shop` is the same shop for AI shopping agents, and the account tools for customers' assistants; `/llms.txt` describes both |
 | `/#setup` | The setup wizard: try it with your own CSV exports or the Brightside Plumbing sample |
 | `/mcp` | The MCP endpoint (Streamable HTTP) |
 | `/fernhill` | **Fernhill Studio**, a fictional photography studio's old invoicing app. 40 invoices, 17 overdue, all marked paid by hand |
 | `/mock-paypal` | A local stand-in for the PayPal endpoints retrofit uses, with buyer pay pages and signed webhooks |
 
-Then: press **Send 22 invoices through PayPal**, open any invoice, press **Pay as customer**, pay it, and watch the legacy app's row turn `paid`. Add `ANTHROPIC_API_KEY` to `.env` to switch on Claude for mapping and the Ops agent.
+Then, on **Today**: press **Send now** on "22 new invoices ready to send", open **Invoices**, open any invoice, press **Pay as customer**, pay it, and watch the legacy app's row turn `paid`. Press **+ New invoice** and type a sentence. `node scripts/stage-demo.mjs` puts the demo into a lived-in state (payments, a plan, a dispute, an agent's order, a customer on autopay). Add `ANTHROPIC_API_KEY` to `.env` to switch on Claude for mapping, photos of job sheets, reminders and the Ops agent.
 
 To run against the **real PayPal sandbox** instead, see [Using the PayPal sandbox](#using-the-paypal-sandbox).
 
@@ -102,7 +148,7 @@ No terminal skills needed beyond starting it: `pnpm retrofit serve` in an empty 
 
 ```bash
 cp .env.example .env            # add PayPal sandbox credentials and ANTHROPIC_API_KEY
-pnpm retrofit init --source sqlite:./path/to/app.db     # or postgres://… or csv:./exports
+pnpm retrofit init --source sqlite:./path/to/app.db     # or postgres://…, mysql://…, csv:./exports, excel:./jobs.xlsx, gsheet:<link>
 pnpm retrofit doctor
 pnpm retrofit sync --dry-run
 pnpm retrofit sync
@@ -179,10 +225,12 @@ claude mcp add --transport http fernhill-shop http://localhost:8787/mcp/shop
 | Area | Endpoints / tools |
 | --- | --- |
 | Invoicing v2 | create, get, update, send, remind, cancel, record payment, record refund, search; **partial payments** (`configuration.partial_payment`) for payment plans |
-| **Orders v2** | create order (with `payment_source.paypal.experience_context`), get, capture: multi-invoice payments in the customer portal, the shop page and AI-agent checkouts |
+| **Orders v2** | create order (with `payment_source.paypal.experience_context`), get, capture: multi-invoice payments in the customer portal, the shop page and AI-agent checkouts; orders on a saved PayPal (`payment_source.paypal.vault_id`) for autopay |
+| **Vault v3** | setup tokens (`usage_type: MERCHANT`) the customer approves, payment tokens, delete: autopay with a saved PayPal |
+| Invoicing QR codes | `generate-qr-code` for pay slips on paper invoices and job sheets |
 | Payments v2 | capture refund; capture fees for the payments ledger |
 | Catalog Products v1, Subscriptions v1 | product, plan and subscription creation, status, cancel |
-| Webhooks v1 | create webhook, list, verify signature; 17 event types (invoice paid/cancelled/refunded, captures, checkout orders, subscriptions, sales, disputes) |
+| Webhooks v1 | create webhook, list, verify signature; 19 event types (invoice paid/cancelled/refunded, captures, checkout orders, subscriptions, sales, disputes, vault payment tokens) |
 | Disputes v1 | list, get, accept claim (policy `never` by default) |
 | Transaction Search | PayPal fees for the payments ledger when a capture webhook was missed; agent tool |
 | **PayPal Agent Toolkit** (`@paypal/agent-toolkit`) | Supplies the Ops agent's read-only PayPal tools (invoices, disputes, transactions, insights, subscriptions, plans, products) in sandbox and production. Writes are deliberately not exposed to the agent. |
@@ -193,6 +241,7 @@ claude mcp add --transport http fernhill-shop http://localhost:8787/mcp/shop
 | --- | --- | --- |
 | **Mapper** | Claude (`claude-opus-5-5`) via the official `@anthropic-ai/sdk`, structured outputs | Reads the masked schema and proposes a typed mapping with rationale, confidence and warnings. The result is validated against the real schema; if it fails, retrofit falls back to its deterministic mapper. |
 | **Ops** | Claude via the SDK tool runner | Answers receivables questions using the ledger, read-only SQL on the legacy database, PayPal Agent Toolkit tools, the collections plan, payment risk, customer history, the cash forecast and month-end figures. Acts only through `propose_action` and `run_collections`, which the policy engine decides. |
+| **Invoice reader** | Claude, vision + structured outputs | Turns a sentence or a photo of a paper job sheet, quote or receipt into an invoice draft, matched against the business's own customers and catalogue. Never invents prices or emails; lists anything unclear (a smudged figure, a missing email) for the owner to check. Sentences fall back to a rule-based reader. |
 | **Support** | Claude, structured outputs | Drafts a dispute response and evidence checklist from the PayPal dispute and the legacy invoice. Text only; the owner submits it. |
 | **Reminder writer** | Claude, structured outputs, low effort | Writes each collections reminder in the requested tone from the invoice facts and the customer's payment history. Told never to threaten, mention fees or legal action, or invent facts. Falls back to templates. |
 | **Digest writer** | Claude, structured outputs, low effort | Writes the two or three opening sentences of the owner's digest from its facts: what came in and the one or two decisions that matter today. Falls back to a deterministic headline. |
@@ -210,37 +259,44 @@ Guardrails: personal data is masked before it reaches the model (sample rows, to
    ```
    The demo registers the webhook itself. Each sandbox run uses a short invoice-number prefix so reruns never collide.
 4. Check everything with `pnpm smoke:sandbox` (creates, sends and records one invoice against the live sandbox).
+5. For autopay, switch on **Save payment methods** (Vault) for the sandbox app in the developer dashboard. The console's **Go live** page walks through the rest and checks each step.
 
 Live (production) mode is refused unless `RETROFIT_ALLOW_LIVE=1`. It has not been tested.
 
 ## Sponsor tools
 
 - **AG Grid Community** (MIT) powers every table in the console: the ledger (filters, quick search, row selection for bulk reminders, custom status and risk renderers, row highlighting, CSV export, pagination), the collections playbook, late-payment risk, customer payment behaviour, approvals with scheduled actions, discrepancies, webhook activity and the editable mapping grids (select editors, boolean editors).
-- **Render**: `render.yaml` deploys the whole demo as one web service.
+- **Render**: `render.yaml` deploys the whole demo as one web service (**Deploy to Render** button above).
 
 ## Repository layout
 
 ```
-packages/core         engine: adapters, mapping, PayPal client, sync, webhooks, reconcile, ledger,
-                      policy rules, collections, payment plans, risk, forecast, journal, payment terms,
-                      statements, Orders checkout (portal, shop, agents), digest
-packages/agents       Claude agents: Mapper, Ops (tool runner + PayPal Agent Toolkit), Support, reminder and digest writers
-packages/mcp          owner MCP server over the engine tools, and the buyer-facing shop MCP server
+packages/core         engine: adapters (SQLite, Postgres, MySQL, CSV, Excel, Google Sheets), mapping,
+                      PayPal client, sync, webhooks, reconcile, ledger, policy rules, collections,
+                      payment plans, risk, forecast, journal, payment terms, statements, Orders checkout
+                      (portal, shop, agents), autopay (Vault), new invoices, QR codes, go-live, Today, digest
+packages/agents       Claude agents: Mapper, Ops (tool runner + PayPal Agent Toolkit), invoice reader (vision),
+                      Support, reminder and digest writers
+packages/mcp          owner MCP server over the engine tools, and the public MCP server for shoppers'
+                      and customers' assistants
 packages/server       Express API, webhook endpoint, SSE live updates, setup wizard API, digest delivery,
-                      one-click approval pages, customer portal, shop, multi-client host;
-                      samples/ holds the Brightside Plumbing CSVs
-packages/dashboard    React + AG Grid console
+                      one-click approval pages, customer portal (autopay), shop, website widget, pay slips,
+                      llms.txt, multi-client host; samples/ holds the Brightside Plumbing CSVs
+packages/dashboard    React + AG Grid console: Today, Ctrl+K, tour, new invoice, go live, website & QR
 packages/cli          paypal-retrofit CLI
 packages/mock-paypal  local PayPal stand-in for tests and offline demos
 site/                 landing page, deployed to GitHub Pages by .github/workflows/pages.yml
+Dockerfile, .devcontainer/, render.yaml   one-click ways to run it
 examples/legacy-invoicer  Fernhill Studio, the legacy app
 ```
 
 ## Development
 
 ```bash
-pnpm test        # 43 tests: engine, webhooks, reconcile, CSV, policies, quiet hours, plans, collections,
-                 # payment terms, portal payments and requests, statements, shop MCP checkout, multi-client,
+pnpm test        # 54 tests: engine, webhooks, reconcile, CSV, Excel, Google Sheets, policies, quiet hours,
+                 # plans, collections, payment terms, portal payments and requests, statements, autopay (Vault),
+                 # new invoices (rules and Claude vision), website widget, QR, go-live, shop and customer
+                 # assistant MCP, multi-client,
                  # risk, forecast, fees, agents, digest + approval links, setup wizard, MCP (in-memory and HTTP)
                  # (offline, against the mock and a fake Messages API)
 pnpm typecheck
@@ -255,7 +311,9 @@ pnpm dashboard:dev   # Vite dev server on :5173, proxied to a running `retrofit 
 - Risk and forecast are transparent heuristics learned from your own history, not a credit model. They get better as more invoices are paid through retrofit.
 - Not a compliance product. It does not handle card data; PayPal does.
 - The setup wizard keeps secrets out of the browser: PayPal and Anthropic keys still come from the environment. On the public demo it only accepts CSV uploads.
-- Shop and agent sales are booked in retrofit's payments ledger and exports, not yet written into the legacy system as new invoices (adapters only update existing rows today).
+- Shop and agent sales are booked in retrofit's payments ledger and exports, not yet written into the legacy system as new invoices (new invoices from the owner are).
+- Google Sheets are read through a share link, so retrofit cannot write back into the sheet itself; PayPal ids and payments live in retrofit and in a downloadable copy. MySQL is exercised by typecheck only, like Postgres.
+- Reading photos needs Claude (`ANTHROPIC_API_KEY`); vaulted (autopay) charges and the QR endpoint are tested against the mock, not yet the live sandbox.
 - Portal payments for several invoices are recorded on each PayPal invoice as a PayPal payment, so PayPal shows them as "marked as paid"; retrofit counts them as collected through PayPal.
 
 ## License

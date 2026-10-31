@@ -10,6 +10,7 @@ import {
 } from './entities.ts';
 import { type RetrofitMapping } from './mapping/schema.ts';
 import { buildStatement, renderStatement } from './statements.ts';
+import { chargeAutopay } from './autopay.ts';
 import { earlyDiscountFor } from './terms.ts';
 import { decidePolicy, describeLocal, type PolicyDecision } from './policy.ts';
 import {
@@ -253,6 +254,8 @@ export class Retrofit {
   }
 
   async sync(opts: { dryRun?: boolean; origin?: ActionOrigin } = {}): Promise<SyncReport> {
+    // Spreadsheets and exports change outside retrofit: read the latest before planning.
+    await this.source.refresh?.();
     const { plan, skipped } = await this.plan();
     const results: SyncReport['results'] = [];
     if (opts.dryRun) return { plan, skipped, results };
@@ -470,6 +473,8 @@ export class Retrofit {
         return this.expireDiscount(pk);
       case 'send_statement':
         return this.sendStatement(pk);
+      case 'charge_autopay':
+        return chargeAutopay(this, pk);
       case 'accept_dispute': {
         const disputeId = String(a.payload.disputeId ?? '');
         if (!disputeId) throw new Error('disputeId is required');

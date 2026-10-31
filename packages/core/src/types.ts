@@ -5,6 +5,8 @@ export interface ColumnInfo {
   type: string;
   nullable: boolean;
   pk: boolean;
+  /** The database fills it when an insert leaves it out (a default or an auto-increment key). */
+  hasDefault?: boolean;
 }
 
 export interface ForeignKey {
@@ -30,7 +32,7 @@ export interface SchemaDescription {
   tables: TableInfo[];
 }
 
-export type SourceKind = 'sqlite' | 'postgres' | 'csv';
+export type SourceKind = 'sqlite' | 'postgres' | 'mysql' | 'csv' | 'excel' | 'gsheet';
 
 export type PayPalEnvironment = 'SANDBOX' | 'PRODUCTION' | 'MOCK';
 
@@ -51,6 +53,7 @@ export const ACTION_KINDS = [
   'apply_late_fee',
   'expire_discount',
   'send_statement',
+  'charge_autopay',
 ] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 

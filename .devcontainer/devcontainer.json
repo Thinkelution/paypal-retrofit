@@ -1,0 +1,17 @@
+{
+  // "Open in GitHub Codespaces": installs, builds and starts the demo, then opens the console in a new tab.
+  "name": "paypal-retrofit demo",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "containerEnv": { "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0" },
+  "postCreateCommand": "sudo corepack enable && pnpm install --frozen-lockfile && pnpm build",
+  "postAttachCommand": "pnpm demo",
+  "forwardPorts": [8787],
+  "portsAttributes": {
+    "8787": { "label": "Retrofit console", "onAutoForward": "openBrowser" }
+  },
+  "hostRequirements": { "cpus": 2 },
+  "customizations": {
+    "codespaces": { "openFiles": ["JUDGES.md"] },
+    "vscode": { "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"] }
+  }
+}

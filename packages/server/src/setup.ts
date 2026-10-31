@@ -189,7 +189,7 @@ export function setupRouter(opts: SetupOptions) {
       const dir = path.join(opts.workspaceRoot, id);
       const configDir = opts.configPath ? path.dirname(path.resolve(opts.configPath)) : dir;
       const rel = (p: string) => path.relative(configDir, p).replace(/\\/g, '/') || '.';
-      let source: string;
+      let source: string | undefined;
       let label: string;
       if (body.kind === 'csv' || body.kind === 'sample') {
         const data = path.join(dir, 'data');
@@ -202,18 +202,38 @@ export function setupRouter(opts: SetupOptions) {
           const files = (Array.isArray(body.files) ? body.files : []) as Array<{
             name: string;
             content: string;
+            encoding?: 'base64';
           }>;
-          if (!files.length) throw new Error('Add at least one CSV file.');
+          if (!files.length) throw new Error('Add an Excel workbook or at least one CSV file.');
           if (files.length > MAX_FILES) throw new Error(`At most ${MAX_FILES} files.`);
           const bytes = files.reduce((s, f) => s + String(f.content ?? '').length, 0);
           if (bytes > MAX_BYTES) throw new Error('The files are larger than 5 MB together.');
           fs.mkdirSync(data, { recursive: true });
-          for (const f of files)
-            fs.writeFileSync(path.join(data, `${safeName(f.name)}.csv`), String(f.content ?? ''));
-          label = `${files.length} CSV file${files.length === 1 ? '' : 's'}`;
+          const workbooks = files.filter((f) => /\.xlsx$/i.test(f.name));
+          if (workbooks.length) {
+            if (files.length > 1) throw new Error('Upload one Excel workbook, or CSV files, not both.');
+            const f = workbooks[0]!;
+            const file = path.join(data, `${safeName(f.name)}.xlsx`);
+            fs.writeFileSync(file, Buffer.from(String(f.content ?? ''), 'base64'));
+            source = `excel:${rel(file)}`;
+            label = `Excel workbook ${f.name}`;
+          } else {
+            for (const f of files)
+              fs.writeFileSync(path.join(data, `${safeName(f.name)}.csv`), String(f.content ?? ''));
+            label = `${files.length} CSV file${files.length === 1 ? '' : 's'}`;
+          }
         }
-        source = `csv:${rel(data)}`;
-      } else if (body.kind === 'sqlite' || body.kind === 'postgres') {
+        source ??= `csv:${rel(data)}`;
+      } else if (body.kind === 'gsheet') {
+        const url = String(body.url ?? '').trim();
+        // A public server only fetches Google's own links; a local one also takes a direct .xlsx URL.
+        const host = /^https?:\/\//.test(url) ? new URL(url).hostname : '';
+        if (host !== 'docs.google.com' && !(opts.allowServerPaths && host))
+          throw new Error('Paste the link of a Google Sheet (https://docs.google.com/spreadsheets/...).');
+        fs.mkdirSync(dir, { recursive: true });
+        source = `gsheet:${url}`;
+        label = 'Google Sheet';
+      } else if (body.kind === 'sqlite' || body.kind === 'postgres' || body.kind === 'mysql') {
         if (!opts.allowServerPaths)
           throw new Error(
             'This server only accepts CSV uploads. Run paypal-retrofit locally to connect a database.',
@@ -223,17 +243,25 @@ export function setupRouter(opts: SetupOptions) {
           if (!fs.existsSync(file)) throw new Error(`No such file: ${file}`);
           source = `sqlite:${rel(file)}`;
           label = path.basename(file);
+        } else if (body.kind === 'mysql') {
+          const url = String(body.url ?? '');
+          if (!/^(mysql|mariadb):\/\//.test(url)) throw new Error('A MySQL URL starts with mysql://');
+          source = url;
+          label = url.replace(/\/\/[^@]*@/, '//***@');
         } else {
           const url = String(body.url ?? '');
           if (!/^postgres(ql)?:\/\//.test(url)) throw new Error('A Postgres URL starts with postgres://');
           source = url;
           label = url.replace(/\/\/[^@]*@/, '//***@');
         }
-      } else throw new Error('Choose CSV files, the sample data, a SQLite file or a Postgres URL.');
+      } else
+        throw new Error(
+          'Choose a spreadsheet, a Google Sheet, the sample data, a SQLite file, or a Postgres or MySQL URL.',
+        );
 
       let schema: SchemaDescription;
       try {
-        const adapter = openSource(source, configDir);
+        const adapter = openSource(source!, configDir);
         try {
           schema = await adapter.introspect();
         } finally {
@@ -245,7 +273,7 @@ export function setupRouter(opts: SetupOptions) {
         fs.rmSync(dir, { recursive: true, force: true });
         throw e;
       }
-      sessions.set(id, { id, dir, configDir, source, label, schema, createdAt: Date.now() });
+      sessions.set(id, { id, dir, configDir, source: source!, label, schema, createdAt: Date.now() });
       // Keep memory bounded on a shared demo.
       for (const [k] of [...sessions.entries()].sort((a, b) => b[1].createdAt - a[1].createdAt).slice(20))
         sessions.delete(k);

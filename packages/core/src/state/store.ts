@@ -95,6 +95,11 @@ CREATE TABLE IF NOT EXISTS outbox (
   subject TEXT NOT NULL, html TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL, detail TEXT,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS autopay (
+  customer_pk TEXT PRIMARY KEY, status TEXT NOT NULL, setup_token_id TEXT, payment_token_id TEXT,
+  paypal_customer_id TEXT, payer_email TEXT, max_amount REAL, last_error TEXT, last_charge_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS digests (
   id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, trigger TEXT NOT NULL, subject TEXT NOT NULL,
   deliveries TEXT NOT NULL, html TEXT NOT NULL, text TEXT NOT NULL
@@ -150,7 +155,7 @@ export interface CustomerRequestRecord {
 export interface OrderRecord {
   id: string;
   paypalOrderId: string | null;
-  channel: 'shop' | 'agent' | 'portal';
+  channel: 'shop' | 'agent' | 'portal' | 'autopay';
   status: 'CREATED' | 'APPROVED' | 'COMPLETED' | 'CANCELLED' | 'FAILED';
   items: Array<{ productId?: string; legacyPk?: string; name: string; quantity: number; unitPrice: number }>;
   /** Portal orders: the invoices this payment covers. */
@@ -161,6 +166,22 @@ export interface OrderRecord {
   approveUrl: string | null;
   captureId: string | null;
   fee: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A customer's saved PayPal (PayPal Vault payment token) for paying invoices automatically. */
+export interface AutopayRecord {
+  customerPk: string;
+  status: 'pending' | 'active' | 'off';
+  setupTokenId: string | null;
+  paymentTokenId: string | null;
+  paypalCustomerId: string | null;
+  payerEmail: string | null;
+  /** The customer's cap per invoice; larger invoices are left for them to pay. */
+  maxAmount: number | null;
+  lastError: string | null;
+  lastChargeAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -535,6 +556,47 @@ export class StateStore {
   }
 
   // ---- customer messages (statements)
+  getAutopay(customerPk: string): AutopayRecord | null {
+    const r = this.db.prepare(`SELECT * FROM autopay WHERE customer_pk = ?`).get(customerPk) as any;
+    return r ? toAutopay(r) : null;
+  }
+  getAutopayByToken(paymentTokenId: string): AutopayRecord | null {
+    const r = this.db.prepare(`SELECT * FROM autopay WHERE payment_token_id = ?`).get(paymentTokenId) as any;
+    return r ? toAutopay(r) : null;
+  }
+  listAutopay(status?: AutopayRecord['status']): AutopayRecord[] {
+    return (
+      (status
+        ? this.db.prepare(`SELECT * FROM autopay WHERE status = ? ORDER BY updated_at DESC`).all(status)
+        : this.db.prepare(`SELECT * FROM autopay ORDER BY updated_at DESC`).all()) as any[]
+    ).map(toAutopay);
+  }
+  saveAutopay(a: Partial<AutopayRecord> & { customerPk: string; status: AutopayRecord['status'] }) {
+    const prev = this.getAutopay(a.customerPk);
+    const next = {
+      setupTokenId: null,
+      paymentTokenId: null,
+      paypalCustomerId: null,
+      payerEmail: null,
+      maxAmount: null,
+      lastError: null,
+      lastChargeAt: null,
+      ...prev,
+      ...a,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO autopay (customer_pk, status, setup_token_id, payment_token_id, paypal_customer_id, payer_email, max_amount, last_error, last_charge_at, created_at, updated_at)
+         VALUES (@customerPk, @status, @setupTokenId, @paymentTokenId, @paypalCustomerId, @payerEmail, @maxAmount, @lastError, @lastChargeAt, @createdAt, @updatedAt)
+         ON CONFLICT(customer_pk) DO UPDATE SET status=excluded.status, setup_token_id=excluded.setup_token_id,
+           payment_token_id=excluded.payment_token_id, paypal_customer_id=excluded.paypal_customer_id,
+           payer_email=excluded.payer_email, max_amount=excluded.max_amount, last_error=excluded.last_error,
+           last_charge_at=excluded.last_charge_at, updated_at=excluded.updated_at`,
+      )
+      .run({ ...next, createdAt: prev?.createdAt ?? now(), updatedAt: now() });
+    return this.getAutopay(a.customerPk)!;
+  }
+
   addOutbox(m: Omit<OutboxRecord, 'id' | 'createdAt'> & { html: string; text: string }): number {
     const r = this.db
       .prepare(
@@ -794,6 +856,22 @@ function toOrder(r: any): OrderRecord {
     approveUrl: r.approve_url,
     captureId: r.capture_id,
     fee: r.fee,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+function toAutopay(r: any): AutopayRecord {
+  return {
+    customerPk: r.customer_pk,
+    status: r.status,
+    setupTokenId: r.setup_token_id,
+    paymentTokenId: r.payment_token_id,
+    paypalCustomerId: r.paypal_customer_id,
+    payerEmail: r.payer_email,
+    maxAmount: r.max_amount,
+    lastError: r.last_error,
+    lastChargeAt: r.last_charge_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

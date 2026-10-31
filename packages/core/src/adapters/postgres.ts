@@ -31,7 +31,7 @@ export class PostgresAdapter implements SourceAdapter {
     const out: TableInfo[] = [];
     for (const { table_name: name } of tables) {
       const cols = await q(
-        `SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position`,
+        `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position`,
         [this.schema, name],
       );
       const pks = await q(
@@ -61,6 +61,7 @@ export class PostgresAdapter implements SourceAdapter {
           type: c.data_type,
           nullable: c.is_nullable === 'YES',
           pk: pkSet.has(c.column_name),
+          hasDefault: c.column_default != null,
         })),
         foreignKeys: fks.map((f) => ({
           column: f.column_name,
@@ -119,6 +120,15 @@ export class PostgresAdapter implements SourceAdapter {
       `UPDATE ${quoteIdent(this.schema)}.${quoteIdent(table)} SET ${sets} WHERE ${quoteIdent(pkColumn)}::text = $${keys.length + 1}`,
       [...keys.map((k) => patch[k]), String(pk)],
     );
+  }
+
+  async insert(table: string, _pkColumn: string, row: Row): Promise<Row> {
+    const keys = Object.keys(row);
+    const r = await this.pool.query(
+      `INSERT INTO ${quoteIdent(this.schema)}.${quoteIdent(table)} (${keys.map(quoteIdent).join(', ')}) VALUES (${keys.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING *`,
+      keys.map((k) => row[k]),
+    );
+    return normaliseRow(r.rows[0]);
   }
 
   async close(): Promise<void> {

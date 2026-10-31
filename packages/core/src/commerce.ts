@@ -69,6 +69,8 @@ export interface CheckoutInput {
   buyer?: { name?: string; email?: string; agent?: string };
   returnUrl: string;
   cancelUrl: string;
+  /** Charge the customer's saved PayPal (autopay) instead of sending them to approve. */
+  vaultId?: string;
 }
 
 const approveLink = (o: any) =>
@@ -141,15 +143,17 @@ export async function createCheckout(rf: Retrofit, input: CheckoutInput): Promis
       },
     ],
     payment_source: {
-      paypal: {
-        experience_context: {
-          brand_name: rf.config.business.name.slice(0, 127),
-          user_action: 'PAY_NOW',
-          shipping_preference: 'NO_SHIPPING',
-          return_url: input.returnUrl,
-          cancel_url: input.cancelUrl,
-        },
-      },
+      paypal: input.vaultId
+        ? { vault_id: input.vaultId }
+        : {
+            experience_context: {
+              brand_name: rf.config.business.name.slice(0, 127),
+              user_action: 'PAY_NOW',
+              shipping_preference: 'NO_SHIPPING',
+              return_url: input.returnUrl,
+              cancel_url: input.cancelUrl,
+            },
+          },
     },
   };
   const order = await rf.paypal.createOrder(body, `retrofit-order-${id}`);
@@ -210,7 +214,7 @@ export async function finalizeCheckout(
           method: 'PAYPAL',
           payment_date: date,
           amount: { currency_code: rec.currency, value: toMoney(inv.amount) },
-          note: `Paid in the customer portal (PayPal order ${rec.paypalOrderId}, capture ${captureId})`,
+          note: `${rec.channel === 'autopay' ? 'Paid automatically with saved PayPal' : 'Paid in the customer portal'} (PayPal order ${rec.paypalOrderId}, capture ${captureId})`,
         },
         `retrofit-portal-${rec.id}-${inv.legacyPk}`,
       );
@@ -235,7 +239,7 @@ export async function finalizeCheckout(
   rf.state.saveOrder({ ...rec, status: 'COMPLETED', captureId, fee });
   rf.emit('order', { id: rec.id });
   const summary = rec.invoices?.length
-    ? `Portal payment ${toMoney(rec.total)} ${rec.currency} for ${rec.invoices.map((i) => i.number).join(', ')}`
+    ? `${rec.channel === 'autopay' ? 'Autopay' : 'Portal payment'} ${toMoney(rec.total)} ${rec.currency} for ${rec.invoices.map((i) => i.number).join(', ')}`
     : `${rec.channel === 'agent' ? 'Agent' : 'Shop'} order ${rec.id} paid: ${toMoney(rec.total)} ${rec.currency}`;
   rf.log.info(summary);
   return { order: rf.state.getOrder(rec.id)!, summary };

@@ -9,6 +9,7 @@
  * Buyer-facing pages (/mock/...) let a person "pay" an invoice or approve a subscription in a browser,
  * which fires the same webhook events PayPal would.
  */
+import QRCode from 'qrcode';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -38,6 +39,8 @@ interface State {
   webhooks: Record<string, Webhook>;
   disputes: Record<string, any>;
   orders: Record<string, any>;
+  setupTokens: Record<string, any>;
+  paymentTokens: Record<string, any>;
   transactions: any[];
   idempotency: Record<string, { status: number; body: unknown }>;
   deliveries: Array<{ at: string; event: string; url: string; status: number | string }>;
@@ -51,6 +54,8 @@ const empty = (): State => ({
   webhooks: {},
   disputes: {},
   orders: {},
+  setupTokens: {},
+  paymentTokens: {},
   transactions: [],
   idempotency: {},
   deliveries: [],
@@ -357,6 +362,17 @@ export function createMockPayPal(opts: MockOptions) {
         body: { rel: 'payer-view', href: inv.detail.metadata.recipient_view_url, method: 'GET' },
       };
     });
+  });
+
+  // QR code for paper invoices: base64 PNG of the payer link, for sent invoices only.
+  app.post('/v2/invoicing/invoices/:id/generate-qr-code', auth, async (req, res) => {
+    const inv = getInv(req, res);
+    if (!inv) return;
+    if (inv.status === 'DRAFT')
+      return fail(res, 422, 'UNPROCESSABLE_ENTITY', 'Send the invoice first', 'INVALID_INVOICE_STATUS');
+    const size = Math.max(150, Math.min(500, Number(req.body?.width ?? 500)));
+    const png = await QRCode.toBuffer(`${base}/mock/invoice/${inv.id}`, { width: size, margin: 1 });
+    res.type('text/plain').send(png.toString('base64'));
   });
 
   app.post('/v2/invoicing/invoices/:id/remind', auth, (req, res) => {
@@ -812,17 +828,51 @@ ${inv.payments?.paid_amount ? `<p class="muted">Paid so far: ${esc(inv.payments.
             details: [{ issue: 'ITEM_TOTAL_MISMATCH', description: 'Items do not add up to the amount' }],
           },
         };
+      // A saved PayPal (vault_id) is charged straight away: no buyer approval, the order completes.
+      const vaultId = b.payment_source?.paypal?.vault_id;
+      const token = vaultId ? state.paymentTokens[vaultId] : undefined;
+      if (vaultId && !token)
+        return {
+          status: 422,
+          body: {
+            name: 'UNPROCESSABLE_ENTITY',
+            details: [{ issue: 'INVALID_PAYMENT_TOKEN', description: 'The payment token is not valid.' }],
+          },
+        };
+      if (token?.declines)
+        return {
+          status: 422,
+          body: {
+            name: 'UNPROCESSABLE_ENTITY',
+            details: [
+              {
+                issue: 'INSTRUMENT_DECLINED',
+                description:
+                  'The instrument presented was either declined by the processor or bank, or it cannot be used for this payment.',
+              },
+            ],
+          },
+        };
       const id = crypto.randomBytes(8).toString('hex').toUpperCase().slice(0, 17);
-      const order = {
+      const order: any = {
         id,
         intent: 'CAPTURE',
-        status: 'PAYER_ACTION_REQUIRED',
+        status: token ? 'APPROVED' : 'PAYER_ACTION_REQUIRED',
         create_time: nowIso(),
         purchase_units: b.purchase_units,
         payment_source: b.payment_source,
       };
       state.orders[id] = order;
-      log(`created order ${id} (${pu.amount.value} ${pu.amount.currency_code})`);
+      log(
+        `created order ${id} (${pu.amount.value} ${pu.amount.currency_code})${token ? ' on a saved PayPal' : ''}`,
+      );
+      if (token) {
+        order.payer = {
+          payer_id: token.payment_source.paypal.payer_id,
+          email_address: token.payment_source.paypal.email_address,
+        };
+        captureNow(order, req.header('paypal-request-id'));
+      }
       return { status: 201, body: orderView(order) };
     }),
   );
@@ -860,6 +910,12 @@ ${inv.payments?.paid_amount ? `<p class="muted">Paid so far: ${esc(inv.payments.
         'The buyer has not approved the order',
         'ORDER_NOT_APPROVED',
       );
+    captureNow(o, key);
+    res.status(201).json(orderView(o));
+  });
+
+  /** Captures an approved order (or a charge on a saved PayPal, which needs no approval). */
+  function captureNow(o: any, key?: string) {
     const pu = o.purchase_units[0];
     const amount = Number(pu.amount.value);
     const c = pu.amount.currency_code;
@@ -893,9 +949,201 @@ ${inv.payments?.paid_amount ? `<p class="muted">Paid so far: ${esc(inv.payments.
     });
     save();
     log(`order ${o.id} captured (${amount})`);
-    res.status(201).json(orderView(o));
     void emit('PAYMENT.CAPTURE.COMPLETED', capture, `Payment completed for ${amount}`);
     void emit('CHECKOUT.ORDER.COMPLETED', orderView(o), `Order ${o.id} completed`);
+  }
+
+  // ---- Vault v3: a payer saves PayPal with the merchant (autopay)
+  const setupView = (t: any) => ({
+    id: t.id,
+    status: t.status,
+    customer: t.customer,
+    payment_source: { paypal: { description: t.paypal.description, usage_type: t.paypal.usage_type } },
+    links: [
+      ...(t.status === 'PAYER_ACTION_REQUIRED'
+        ? [{ href: `${base}/mock/vault/${t.id}`, rel: 'approve', method: 'GET' }]
+        : []),
+      { href: `${base}/v3/vault/payment-tokens`, rel: 'confirm', method: 'POST' },
+      { href: `${base}/v3/vault/setup-tokens/${t.id}`, rel: 'self', method: 'GET' },
+    ],
+  });
+  const tokenView = (t: any) => ({
+    id: t.id,
+    customer: t.customer,
+    payment_source: t.payment_source,
+    links: [
+      { href: `${base}/v3/vault/payment-tokens/${t.id}`, rel: 'self', method: 'GET' },
+      { href: `${base}/v3/vault/payment-tokens/${t.id}`, rel: 'delete', method: 'DELETE' },
+    ],
+  });
+  app.post('/v3/vault/setup-tokens', auth, (req, res) =>
+    idem(req, res, () => {
+      const ps = req.body?.payment_source?.paypal;
+      if (!ps?.experience_context?.return_url || !ps.usage_type)
+        return {
+          status: 422,
+          body: {
+            name: 'UNPROCESSABLE_ENTITY',
+            details: [
+              {
+                issue: 'MISSING_REQUIRED_PARAMETER',
+                description: 'usage_type and experience_context.return_url are required',
+              },
+            ],
+          },
+        };
+      const id = crypto.randomBytes(8).toString('hex').toUpperCase().slice(0, 15);
+      const t = {
+        id,
+        status: 'PAYER_ACTION_REQUIRED',
+        customer: {
+          id: req.body?.customer?.id ?? `CUST${crypto.randomBytes(4).toString('hex').toUpperCase()}`,
+        },
+        paypal: ps,
+        create_time: nowIso(),
+      };
+      state.setupTokens[id] = t;
+      save();
+      return { status: 201, body: setupView(t) };
+    }),
+  );
+  app.get('/v3/vault/setup-tokens/:id', auth, (req, res) => {
+    const t = state.setupTokens[req.params.id!];
+    if (!t)
+      return fail(
+        res,
+        404,
+        'RESOURCE_NOT_FOUND',
+        'The specified resource does not exist.',
+        'INVALID_RESOURCE_ID',
+      );
+    res.json(setupView(t));
+  });
+  app.post('/v3/vault/payment-tokens', auth, (req, res) =>
+    idem(req, res, () => {
+      const t = state.setupTokens[req.body?.payment_source?.token?.id];
+      if (!t || req.body?.payment_source?.token?.type !== 'SETUP_TOKEN')
+        return {
+          status: 404,
+          body: { name: 'RESOURCE_NOT_FOUND', details: [{ issue: 'INVALID_RESOURCE_ID' }] },
+        };
+      if (t.paymentTokenId && state.paymentTokens[t.paymentTokenId])
+        return { status: 200, body: tokenView(state.paymentTokens[t.paymentTokenId]) };
+      if (t.status !== 'APPROVED')
+        return {
+          status: 422,
+          body: {
+            name: 'UNPROCESSABLE_ENTITY',
+            details: [
+              {
+                issue: 'SETUP_TOKEN_NOT_APPROVED',
+                description: 'The payer has not approved the setup token.',
+              },
+            ],
+          },
+        };
+      const id = crypto.randomBytes(4).toString('hex');
+      const pt = {
+        id,
+        customer: t.customer,
+        payment_source: {
+          paypal: {
+            email_address: 'buyer@example.com',
+            payer_id: 'MOCKBUYER',
+            description: t.paypal.description,
+            usage_type: t.paypal.usage_type,
+          },
+        },
+        create_time: nowIso(),
+      };
+      state.paymentTokens[id] = pt;
+      t.paymentTokenId = id;
+      t.status = 'VAULTED';
+      save();
+      log(`payment token ${id} saved for customer ${t.customer.id}`);
+      void emit('VAULT.PAYMENT-TOKEN.CREATED', tokenView(pt), 'A payment token was created');
+      return { status: 201, body: tokenView(pt) };
+    }),
+  );
+  app.get('/v3/vault/payment-tokens/:id', auth, (req, res) => {
+    const t = state.paymentTokens[req.params.id!];
+    if (!t)
+      return fail(
+        res,
+        404,
+        'RESOURCE_NOT_FOUND',
+        'The specified resource does not exist.',
+        'INVALID_RESOURCE_ID',
+      );
+    res.json(tokenView(t));
+  });
+  const removeToken = (id: string) => {
+    const t = state.paymentTokens[id];
+    if (!t) return false;
+    delete state.paymentTokens[id];
+    save();
+    void emit('VAULT.PAYMENT-TOKEN.DELETED', { id, customer: t.customer }, 'A payment token was deleted');
+    return true;
+  };
+  app.delete('/v3/vault/payment-tokens/:id', auth, (req, res) => {
+    if (!removeToken(req.params.id!))
+      return fail(
+        res,
+        404,
+        'RESOURCE_NOT_FOUND',
+        'The specified resource does not exist.',
+        'INVALID_RESOURCE_ID',
+      );
+    res.status(204).end();
+  });
+  /** The payer's page for saving PayPal (what PayPal shows at the approve link). */
+  app.get('/mock/vault/:id', (req, res) => {
+    const t = state.setupTokens[req.params.id!];
+    if (!t) return res.status(404).send(page('Not found', '<p>No such setup token.</p>'));
+    const ctx = t.paypal.experience_context ?? {};
+    res.send(
+      page(
+        `Save PayPal with ${esc(ctx.brand_name ?? 'merchant')}`,
+        `<h2>${esc(ctx.brand_name ?? 'Merchant')}</h2><p>${esc(t.paypal.description ?? 'Save PayPal for future payments')}</p>
+<p class="muted">You can stop this at any time in your PayPal account (Settings, then Payments, then Automatic payments).</p>
+${t.status === 'PAYER_ACTION_REQUIRED' ? `<form method="post" action="${esc(req.baseUrl)}/mock/vault/${esc(t.id)}/approve"><button>Agree and save PayPal (test)</button></form>${ctx.cancel_url ? `<p><a href="${esc(ctx.cancel_url)}">Cancel and return</a></p>` : ''}` : `<p class="ok">${esc(t.status)}</p>`}`,
+      ),
+    );
+  });
+  const approveSetup = (id: string) => {
+    const t = state.setupTokens[id];
+    if (!t || t.status !== 'PAYER_ACTION_REQUIRED') return null;
+    t.status = 'APPROVED';
+    save();
+    log(`setup token ${id} approved by the payer`);
+    return t;
+  };
+  app.post('/mock/vault/:id/approve', (req, res) => {
+    const t = approveSetup(req.params.id!);
+    const ret = state.setupTokens[req.params.id!]?.paypal?.experience_context?.return_url;
+    if (t && ret) {
+      const u = new URL(ret);
+      u.searchParams.set('approval_token_id', t.id);
+      u.searchParams.set('approval_session_id', crypto.randomBytes(6).toString('hex'));
+      return res.redirect(303, u.toString());
+    }
+    res.redirect(303, `${req.baseUrl}/mock/vault/${req.params.id}`);
+  });
+  app.post('/mock/api/vault/:id/approve', (req, res) => {
+    const t = approveSetup(req.params.id!);
+    if (!t) return res.status(400).json({ error: 'Setup token cannot be approved' });
+    res.json(setupView(t));
+  });
+  /** Test controls: a saved PayPal that gets declined, or one the payer removes in their PayPal account. */
+  app.post('/mock/api/vault/payment-tokens/:id/decline', (req, res) => {
+    const t = state.paymentTokens[req.params.id!];
+    if (!t) return res.status(404).json({ error: 'No such payment token' });
+    t.declines = req.body?.declines !== false;
+    save();
+    res.json({ id: t.id, declines: t.declines });
+  });
+  app.post('/mock/api/vault/payment-tokens/:id/revoke', (req, res) => {
+    res.status(removeToken(req.params.id!) ? 200 : 404).json({ ok: true });
   });
 
   /** Buyer approves an order (what the PayPal checkout window does). */

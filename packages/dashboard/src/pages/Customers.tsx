@@ -81,6 +81,19 @@ export function Customers({
           ),
       },
       {
+        field: 'autopay',
+        headerName: 'Autopay',
+        width: 110,
+        cellRenderer: (p: any) =>
+          p.value === 'active' ? (
+            <Pill tone="ok">on</Pill>
+          ) : p.value === 'pending' ? (
+            <Pill>setting up</Pill>
+          ) : (
+            ''
+          ),
+      },
+      {
         field: 'openRequests',
         headerName: 'Asked',
         width: 90,
