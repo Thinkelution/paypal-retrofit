@@ -30,8 +30,30 @@ export interface ToolEvent {
 const MAX = 12000;
 export const clip = (s: string) =>
   s.length > MAX ? `${s.slice(0, MAX)}\n…(truncated ${s.length - MAX} chars)` : s;
-export const json = (v: unknown, revealPii = false) =>
-  clip(JSON.stringify(redact(v, { emails: !revealPii }), null, 1));
+/**
+ * Tool results stay valid JSON (MCP clients parse them): long lists lose rows from the end, and `omitted`
+ * says how many, instead of the text being cut mid-way.
+ */
+export const json = (v: unknown, revealPii = false) => {
+  const data = redact(v, { emails: !revealPii }) as any;
+  const text = (x: unknown) => JSON.stringify(x, null, 1);
+  let s = text(data);
+  if (s.length <= MAX || !data || typeof data !== 'object' || Array.isArray(data)) return clip(s);
+  const out = { ...data };
+  const lists = Object.keys(out).filter((k) => Array.isArray(out[k]));
+  const omitted: Record<string, number> = {};
+  while (s.length > MAX) {
+    const k = lists
+      .filter((x) => out[x].length > 1)
+      .sort((a, b) => text(out[b]).length - text(out[a]).length)[0];
+    if (!k) break;
+    const keep = Math.max(1, Math.floor(out[k].length * 0.8));
+    omitted[k] = (omitted[k] ?? 0) + out[k].length - keep;
+    out[k] = out[k].slice(0, keep);
+    s = text({ ...out, omitted });
+  }
+  return clip(s);
+};
 
 /** Tools backed by retrofit's own engine. Reads are free; the only write is propose_action, which goes through the policy gate. */
 export function engineTools(

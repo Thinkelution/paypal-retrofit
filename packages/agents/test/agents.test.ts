@@ -2,6 +2,7 @@ import express from 'express';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { harness, listen } from '../../core/test/helpers.ts';
 import { engineTools, OpsAgent, paypalTools, proposeMapping } from '../src/index.ts';
+import { json } from '../src/tools/engine-tools.ts';
 
 let h: Awaited<ReturnType<typeof harness>> | undefined;
 afterEach(async () => {
@@ -55,6 +56,15 @@ async function fakeClaude() {
 }
 
 describe('engine tools', () => {
+  it('keeps long tool results valid JSON by dropping rows, not cutting text', () => {
+    const rows = Array.from({ length: 400 }, (_, i) => ({ number: `INV-${1000 + i}`, note: 'x'.repeat(60) }));
+    const out = JSON.parse(json({ count: rows.length, rows }));
+    expect(out.count).toBe(400);
+    expect(out.rows.length).toBeLessThan(400);
+    expect(out.rows.length + out.omitted.rows).toBe(400);
+    expect(out.rows[0].number).toBe('INV-1000');
+  });
+
   it('find_invoices and propose_action go through the ledger and the policy gate', async () => {
     h = await harness();
     await h.rf.sync();

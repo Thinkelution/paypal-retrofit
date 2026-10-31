@@ -293,7 +293,7 @@ examples/legacy-invoicer  Fernhill Studio, the legacy app
 ## Development
 
 ```bash
-pnpm test        # 54 tests: engine, webhooks, reconcile, CSV, Excel, Google Sheets, policies, quiet hours,
+pnpm test        # 55 tests: engine, webhooks, reconcile, CSV, Excel, Google Sheets, policies, quiet hours,
                  # plans, collections, payment terms, portal payments and requests, statements, autopay (Vault),
                  # new invoices (rules and Claude vision), website widget, QR, go-live, shop and customer
                  # assistant MCP, multi-client,

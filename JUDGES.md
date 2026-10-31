@@ -73,7 +73,7 @@ Log in to <https://www.sandbox.paypal.com> as the buyer to pay an invoice. PayPa
 ## Checks
 
 ```bash
-pnpm test         # 54 tests: engine, webhooks, reconcile, CSV, Excel, Google Sheets, agents (incl. photo reading), digest, setup wizard, MCP, terms, portal, autopay, website widget, QR, go-live, shop, multi-client; all offline
+pnpm test         # 55 tests: engine, webhooks, reconcile, CSV, Excel, Google Sheets, agents (incl. photo reading), digest, setup wizard, MCP, terms, portal, autopay, website widget, QR, go-live, shop, multi-client; all offline
 pnpm smoke:sandbox   # live sandbox: create, send and record one invoice (needs credentials)
 ```
 
