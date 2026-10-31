@@ -102,10 +102,18 @@
   .nav nav { display: flex; gap: 20px; margin-left: auto; }
   .nav nav a { color: var(--ink-2); text-decoration: none; font-size: 15px; font-weight: 500; white-space: nowrap; }
   .nav .logo { white-space: nowrap; }
-  @media (max-width: 1240px) { .nav nav { gap: 14px; } .nav nav a { font-size: 14px; } .nav nav a.minor { display: none; } }
-  .nav nav a:hover { color: var(--ink); }
   .menu-btn { display: none; align-items: center; justify-content: center; width: 40px; height: 40px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink); cursor: pointer; }
   .menu-btn svg { width: 20px; height: 20px; }
+  /* Every section link fits only on wide screens; below that they all live behind the menu button. */
+  @media (max-width: 1240px) {
+    .nav nav { display: none; }
+    .nav .btn { margin-left: auto; }
+    .menu-btn { display: inline-flex; }
+    .nav.open nav { display: flex; flex-direction: column; gap: 0; position: absolute; top: 64px; left: 0; right: 0; margin: 0; padding: 8px 16px 16px; background: var(--bg); border-bottom: 1px solid var(--line); max-height: calc(100dvh - 64px); overflow-y: auto; }
+    .nav.open nav a, .nav.open nav a.minor { display: block; padding: 12px 4px; font-size: 16px; border-bottom: 1px solid var(--line); }
+    .nav.open nav a:last-child { border-bottom: 0; }
+  }
+  .nav nav a:hover { color: var(--ink); }
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 20px; border-radius: 10px; font-weight: 600; font-size: 15px; text-decoration: none; border: 1px solid var(--line); color: var(--ink); background: var(--surface); white-space: nowrap; cursor: pointer; }
   .btn:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
@@ -298,12 +306,6 @@
   footer a { color: var(--ink-2); }
 
   @media (max-width: 980px) {
-    .nav nav { display: none; }
-    .nav .btn { margin-left: auto; }
-    .menu-btn { display: inline-flex; }
-    .nav.open nav { display: flex; flex-direction: column; gap: 0; position: absolute; top: 64px; left: 0; right: 0; margin: 0; padding: 8px 16px 16px; background: var(--bg); border-bottom: 1px solid var(--line); max-height: calc(100dvh - 64px); overflow-y: auto; }
-    .nav.open nav a, .nav.open nav a.minor { display: block; padding: 12px 4px; font-size: 16px; border-bottom: 1px solid var(--line); }
-    .nav.open nav a:last-child { border-bottom: 0; }
     .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .step, .qs, .hack, .two { grid-template-columns: minmax(0, 1fr); }
     .cards, .agents, .arch-notes, .problem-list { grid-template-columns: 1fr 1fr; }
